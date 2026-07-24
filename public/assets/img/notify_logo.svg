@@ -1,0 +1,13 @@
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="notifyGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ff9f43"/>
+            <stop offset="100%" stop-color="#ff6f61"/>
+        </linearGradient>
+    </defs>
+    <circle cx="24" cy="24" r="22" fill="url(#notifyGradient)" opacity="0.95"/>
+    <path d="M24 12c-4.418 0-8 3.582-8 8v5.382l-2.105 4.21A1 1 0 0 0 14.789 31h18.422a1 1 0 0 0 .894-1.408L32 25.382V20c0-4.418-3.582-8-8-8z" fill="#fff"/>
+    <circle cx="24" cy="35" r="3" fill="#fff" opacity="0.9"/>
+    <text x="24" y="44" font-size="7" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif">Notify</text>
+</svg>
+
