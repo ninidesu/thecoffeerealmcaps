@@ -1,6 +1,6 @@
 # thecoffeerealmcaps
 
-A clean React + Vite + Supabase rebuild of the legacy CoffeeRealm system. The legacy repository was used only to understand its visual identity, pages, and workflows. This project contains no PHP or MySQL code.
+A clean React + Vite + Supabase rebuild of the legacy thecoffeerealm system. The legacy repository was used only to understand its visual identity, pages, and workflows. This project contains no PHP or MySQL code.
 
 ## Supabase connection
 

@@ -1,4 +1,4 @@
--- The Coffee Realm cashier-only Supabase setup
+-- thecoffeerealm cashier-only Supabase setup
 -- Run this in Supabase Dashboard > SQL Editor.
 -- It creates the tables expected by the React cashier POS.
 

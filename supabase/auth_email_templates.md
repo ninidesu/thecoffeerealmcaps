@@ -1,4 +1,4 @@
-# CoffeeRealm Supabase Auth email templates
+# thecoffeerealm Supabase Auth email templates
 
 Use these in Supabase Dashboard > Authentication > Emails.
 Important:
@@ -31,7 +31,7 @@ Supabase Dashboard > Authentication > Emails > Templates > Confirm signup
 Subject:
 
 ```text
-the coffee realm - Verify Your Email
+thecoffeerealm - Verify Your Email
 ```
 
 HTML:
@@ -44,17 +44,17 @@ HTML:
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;width:100%;">
           <tr>
             <td style="background-color:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 8px 24px rgba(31,47,38,0.10);">
-              <img src="https://res.cloudinary.com/dkpdilkin/image/upload/f_auto,q_auto,w_1200/emailbg_miswbo.jpg" alt="the coffee realm Email Banner" width="640" style="display:block;width:100%;max-width:640px;height:auto;border:0;margin:0;padding:0;">
+              <img src="https://res.cloudinary.com/dkpdilkin/image/upload/f_auto,q_auto,w_1200/emailbg_miswbo.jpg" alt="thecoffeerealm Email Banner" width="640" style="display:block;width:100%;max-width:640px;height:auto;border:0;margin:0;padding:0;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
                 <tr>
                   <td style="padding:32px 32px 12px;text-align:center;">
-                    <div style="font-size:13px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">the coffee realm</div>
+                    <div style="font-size:13px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">thecoffeerealm</div>
                     <div style="font-size:30px;line-height:38px;font-weight:bold;color:#1b2d22;margin:0;">Verify Your Email</div>
                   </td>
                 </tr>
                 <tr>
                   <td style="padding:0 32px 8px;text-align:center;font-size:16px;line-height:26px;color:#4f6358;">
-                    Thank you for registering with the coffee realm. Use the code below to verify your email address.
+                    Thank you for registering with thecoffeerealm. Use the code below to verify your email address.
                   </td>
                 </tr>
                 <tr>
@@ -99,7 +99,7 @@ HTML:
 Subject:
 
 ```text
-the coffee realm - Reset Your Password
+thecoffeerealm - Reset Your Password
 ```
 
 HTML:
@@ -112,9 +112,9 @@ HTML:
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;width:100%;">
           <tr>
             <td style="background-color:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 8px 24px rgba(31,47,38,0.10);">
-              <img src="https://res.cloudinary.com/dkpdilkin/image/upload/f_auto,q_auto,w_1200/emailbg_miswbo.jpg" alt="the coffee realm Email Banner" width="640" style="display:block;width:100%;max-width:640px;height:auto;border:0;margin:0;padding:0;">
+              <img src="https://res.cloudinary.com/dkpdilkin/image/upload/f_auto,q_auto,w_1200/emailbg_miswbo.jpg" alt="thecoffeerealm Email Banner" width="640" style="display:block;width:100%;max-width:640px;height:auto;border:0;margin:0;padding:0;">
               <div style="padding:32px 32px 12px;text-align:center;">
-                <div style="font-size:13px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">the coffee realm</div>
+                <div style="font-size:13px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">thecoffeerealm</div>
                 <div style="font-size:30px;line-height:38px;font-weight:bold;color:#1b2d22;margin:0;">Reset Your Password</div>
               </div>
               <div style="padding:0 32px 20px;text-align:center;font-size:16px;line-height:26px;color:#4f6358;">

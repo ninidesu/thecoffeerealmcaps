@@ -1,4 +1,4 @@
--- CoffeeRealm custom 6-digit customer signup OTP storage
+-- thecoffeerealm custom 6-digit customer signup OTP storage
 -- Run this in Supabase SQL Editor before deploying the customer OTP Edge Functions.
 
 create extension if not exists pgcrypto;

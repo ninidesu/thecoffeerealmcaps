@@ -1,5 +1,5 @@
 export const store = {
-  name: 'the coffee realm', branch: 'North Fairview',
+  name: 'thecoffeerealm', branch: 'North Fairview',
   address: 'Lot 1 Block 210 Mark Street corner Dollar Street, Quezon City, Philippines, 1121',
   phone: '+63 997 533 7958', email: 'main.thecoffeerealm@gmail.com',
   facebook: 'https://www.facebook.com/thecoffeerealmx', instagram: 'https://www.instagram.com/thecoffeerealmx',

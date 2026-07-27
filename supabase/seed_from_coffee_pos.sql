@@ -1,4 +1,4 @@
--- Seed Coffee Realm catalog from C:\Users\Danica\Downloads\coffee_pos.sql
+-- Seed thecoffeerealm catalog from C:\Users\Danica\Downloads\coffee_pos.sql
 -- Run after supabase/cashier_schema.sql in Supabase SQL Editor.
 
 insert into public.categories (name, slug, sort_order, is_active) values

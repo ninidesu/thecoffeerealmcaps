@@ -14,7 +14,7 @@ export default function AppShell({ role, title, eyebrow, children, actions }) {
   const groups = role === 'admin' ? adminGroups : staffGroups
   return <div className={`app-layout legacy-${role}`}>
     <aside className="sidebar internal-sidebar">
-      <div className="internal-brand"><img src="/images/coffeerealmlogo.png" alt="the coffee realm logo"/><div><h2>the coffee realm</h2><p>{role === 'admin' ? 'Admin Portal' : 'Operations Staff'}</p></div></div>
+      <div className="internal-brand"><img src="/images/coffeerealmlogo.png" alt="thecoffeerealm logo"/><div><h2>thecoffeerealm</h2><p>{role === 'admin' ? 'Admin Portal' : 'Operations Staff'}</p></div></div>
       <nav aria-label={`${role} navigation`}>{groups.map(group => <div className="internal-nav-group" key={group.label || 'main'}>{group.label && <span className="internal-group-label">{group.label}</span>}{group.links.map(([label,to,Icon]) => <NavLink key={to} to={to} end={to === `/${role}`} title={label}><Icon size={20}/><span>{label}</span></NavLink>)}</div>)}</nav>
       <a className="sidebar-exit" href="/portal"><LogOut size={19}/><span>Logout</span></a>
     </aside>

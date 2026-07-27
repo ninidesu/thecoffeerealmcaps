@@ -449,7 +449,7 @@ export default function CashierPage() {
     <div className="legacy-cashier">
       <header className="legacy-cashier-top">
         <div className="cashier-top-left">
-          <img src="/images/coffeerealmlogo.png" alt="Coffee Realm logo" />
+          <img src="/images/coffeerealmlogo.png" alt="thecoffeerealm logo" />
           <strong>thecoffeerealm point of sales for walk-in orders</strong>
         </div>
         <div className="cashier-time">
@@ -756,7 +756,7 @@ function CashierReceipt({ order, onClose }) {
           <div className="receipt-line" />
           <div className="receipt-row"><span className="receipt-label">Items:</span><span className="receipt-value">{itemCount}</span></div>
           <div className="receipt-line" />
-          <div className="receipt-footer">Thank you for choosing the coffee realm,<br />Enjoy your drink and have a great day!</div>
+          <div className="receipt-footer">Thank you for choosing thecoffeerealm,<br />Enjoy your drink and have a great day!</div>
           <div className="receipt-line" />
         </div>
       </div>

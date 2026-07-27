@@ -14,14 +14,14 @@ export function AuthProvider({ children }) {
       setSession(nextSession)
       if (!nextSession) { setProfile(null); setLoading(false); return }
       const { data } = await supabase.from('profiles').select('*').eq('id', nextSession.user.id).maybeSingle()
-      if (active) { setProfile(data || { id: nextSession.user.id, email: nextSession.user.email }); setLoading(false) }
+      if (active) { setProfile({ id: nextSession.user.id, email: nextSession.user.email, ...nextSession.user.user_metadata, ...(data || {}) }); setLoading(false) }
     }
     if (!isSupabaseConfigured) { setLoading(false); return undefined }
     supabase.auth.getSession().then(({ data }) => hydrate(data.session))
     const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => hydrate(next))
     return () => { active = false; listener.subscription.unsubscribe() }
   }, [])
-  const value = useMemo(() => ({ session, user: session?.user || null, profile, loading, signOut: () => supabase?.auth.signOut() }), [session, profile, loading])
+  const value = useMemo(() => ({ session, user: session?.user || null, profile, loading, updateProfile: setProfile, signOut: () => supabase?.auth.signOut() }), [session, profile, loading])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 export const useAuth = () => useContext(AuthContext)

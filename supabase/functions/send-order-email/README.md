@@ -1,6 +1,6 @@
-# CoffeeRealm order email function
+# thecoffeerealm order email function
 
-This Supabase Edge Function sends CoffeeRealm order emails using the old system's email/receipt layout as the reference.
+This Supabase Edge Function sends thecoffeerealm order emails using the old system's email/receipt layout as the reference.
 
 It supports:
 
@@ -22,8 +22,8 @@ Set these in Supabase Dashboard → Edge Functions → Secrets, or with the Supa
 ```bash
 supabase secrets set RESEND_API_KEY="your_resend_api_key"
 supabase secrets set MAIL_FROM_EMAIL="orders@your-domain.com"
-supabase secrets set MAIL_FROM_NAME="the coffee realm"
-supabase secrets set STORE_NAME="the coffee realm"
+supabase secrets set MAIL_FROM_NAME="thecoffeerealm"
+supabase secrets set STORE_NAME="thecoffeerealm"
 supabase secrets set STORE_ADDRESS="Lot 1 Block 210 Mark Street corner Dollar Street, Quezon City"
 supabase secrets set STORE_CONTACT="+63 997 533 7958"
 ```

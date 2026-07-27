@@ -41,13 +41,13 @@ const corsHeaders = {
 };
 
 const storeProfile = {
-  name: Deno.env.get("STORE_NAME") || "the coffee realm",
+  name: Deno.env.get("STORE_NAME") || "thecoffeerealm",
   address:
     Deno.env.get("STORE_ADDRESS") ||
     "Lot 1 Block 210 Mark Street corner Dollar Street, Quezon City",
   contact: Deno.env.get("STORE_CONTACT") || "+63 997 533 7958",
   fromEmail: Deno.env.get("MAIL_FROM_EMAIL") || "",
-  fromName: Deno.env.get("MAIL_FROM_NAME") || "the coffee realm",
+  fromName: Deno.env.get("MAIL_FROM_NAME") || "thecoffeerealm",
   bannerImage:
     Deno.env.get("MAIL_BANNER_IMAGE") ||
     "https://res.cloudinary.com/dkpdilkin/image/upload/f_auto,q_auto,w_1200/emailbg_miswbo.jpg",
@@ -132,7 +132,7 @@ const buildOrderEmailHtml = (payload: Required<Pick<OrderEmailPayload, "type" | 
   const isCompleted = payload.type === "order_completed";
   const title = isCompleted ? "Your Order Is Complete" : "Your Order Has Been Confirmed";
   const intro = isCompleted
-    ? "Thank you for choosing the coffee realm. Your order is now complete."
+    ? "Thank you for choosing thecoffeerealm. Your order is now complete."
     : "Your payment has been verified. Your order is now being prepared.";
   const note = isCompleted
     ? "Your receipt is attached to this email for your records."
@@ -153,9 +153,9 @@ const buildOrderEmailHtml = (payload: Required<Pick<OrderEmailPayload, "type" | 
         <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:640px;width:100%;">
           <tr>
             <td style="background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 8px 24px rgba(31,47,38,.10);">
-              <img src="${escapeHtml(storeProfile.bannerImage)}" alt="the coffee realm" width="640" style="display:block;width:100%;height:auto;border:0;">
+              <img src="${escapeHtml(storeProfile.bannerImage)}" alt="thecoffeerealm" width="640" style="display:block;width:100%;height:auto;border:0;">
               <div style="padding:32px 32px 12px;text-align:center;">
-                <div style="font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">the coffee realm</div>
+                <div style="font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">thecoffeerealm</div>
                 <h1 style="margin:0;color:#1b2d22;font-size:30px;line-height:38px;">${escapeHtml(title)}</h1>
               </div>
               <div style="padding:0 32px 18px;text-align:center;font-size:16px;line-height:26px;color:#4f6358;">${escapeHtml(
@@ -207,7 +207,7 @@ const buildOrderEmailHtml = (payload: Required<Pick<OrderEmailPayload, "type" | 
                 note,
               )}</div>
               <div style="padding:24px 32px 30px;text-align:center;font-size:13px;line-height:21px;color:#708278;">
-                If you did not place this order, please contact the coffee realm support.
+                If you did not place this order, please contact thecoffeerealm support.
               </div>
             </td>
           </tr>
@@ -312,7 +312,7 @@ const buildReceiptHtml = (order: OrderEmailPayload["order"] = {}) => {
         : ""
     }
     <div class="receipt-line"></div>
-    <div class="receipt-footer">Thank you for choosing the coffee realm,<br>Enjoy your drink and have a great day!</div>
+    <div class="receipt-footer">Thank you for choosing thecoffeerealm,<br>Enjoy your drink and have a great day!</div>
     <div class="receipt-line"></div>
   </div>
 </body>
@@ -384,10 +384,10 @@ serve(async (req) => {
     const receiptHtml = payload.receipt_html || buildReceiptHtml(order);
     const subject =
       type === "order_completed"
-        ? `the coffee realm - Order ${order.order_number || ""} completed`
+        ? `thecoffeerealm - Order ${order.order_number || ""} completed`
         : type === "order_confirmed"
-          ? `the coffee realm - Order ${order.order_number || ""} confirmed`
-          : `the coffee realm - Receipt ${order.order_number || ""}`;
+          ? `thecoffeerealm - Order ${order.order_number || ""} confirmed`
+          : `thecoffeerealm - Receipt ${order.order_number || ""}`;
 
     const html =
       type === "receipt"

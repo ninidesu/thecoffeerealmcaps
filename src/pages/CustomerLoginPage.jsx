@@ -61,7 +61,7 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     setPendingPassword(password)
     setOtpCode(Array(otpDigits).fill(''))
     setOtpOpen(true)
-    setAuthMessage('We sent a 6-digit CoffeeRealm verification code to your email. Check your inbox to complete registration.')
+    setAuthMessage('We sent a 6-digit thecoffeerealm verification code to your email. Check your inbox to complete registration.')
   }
 
   async function verifyOtp() {
@@ -155,20 +155,20 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
               <span>Password</span>
               <div><Lock size={19} /><input name="password" type={showRegisterPassword ? 'text' : 'password'} placeholder="Create a password" /><button type="button" aria-label="Toggle password visibility" onClick={() => setShowRegisterPassword((value) => !value)}>{showRegisterPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
             </label>
-            <p className="legacy-auth-hint">CoffeeRealm will send a 6-digit verification code before the customer account is created.</p>
+            <p className="legacy-auth-hint">thecoffeerealm will send a 6-digit verification code before the customer account is created.</p>
             <button type="submit" className="legacy-auth-submit" disabled={loading}><UserPlus size={18} /> {loading ? 'SENDING...' : 'CREATE ACCOUNT'}</button>
           </form>
         </div>
 
         <div className="legacy-auth-toggle">
           <div className="legacy-auth-panel toggle-left">
-            <img src="/images/coffeerealmlogo.png" alt="the coffee realm logo" />
+            <img src="/images/coffeerealmlogo.png" alt="thecoffeerealm logo" />
             <h2>Hello, Welcome!</h2>
             <p>Don't have an account?</p>
             <button type="button" onClick={() => { setAuthError(''); setAuthMessage(''); setMode('register') }}>Register Now!</button>
           </div>
           <div className="legacy-auth-panel toggle-right">
-            <img src="/images/coffeerealmlogo.png" alt="the coffee realm logo" />
+            <img src="/images/coffeerealmlogo.png" alt="thecoffeerealm logo" />
             <h2>Welcome Back!</h2>
             <p>Already have an account?</p>
             <button type="button" onClick={() => { setAuthError(''); setAuthMessage(''); setMode('login') }}>Login!</button>

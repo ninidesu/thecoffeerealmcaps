@@ -1,12 +1,12 @@
-# CoffeeRealm custom 6-digit customer OTP setup
+# thecoffeerealm custom 6-digit customer OTP setup
 
-This replaces Supabase's built-in signup confirmation email with the old CoffeeRealm-style 6-digit OTP flow.
+This replaces Supabase's built-in signup confirmation email with the old thecoffeerealm-style 6-digit OTP flow.
 
 ## What this does
 
 1. Customer fills out registration form.
 2. React calls `request-customer-otp`.
-3. The Edge Function generates a 6-digit OTP and sends the CoffeeRealm email template.
+3. The Edge Function generates a 6-digit OTP and sends the thecoffeerealm email template.
 4. Customer enters the OTP.
 5. React calls `verify-customer-otp` with the OTP and pending account details.
 6. The Edge Function verifies the OTP and creates a confirmed Supabase Auth customer account.
@@ -27,7 +27,7 @@ In Supabase Dashboard > Edge Functions > Secrets, add:
 ```text
 RESEND_API_KEY=your_resend_api_key
 MAIL_FROM_EMAIL=your_verified_sender_email
-MAIL_FROM_NAME=the coffee realm
+MAIL_FROM_NAME=thecoffeerealm
 OTP_PEPPER=any-long-random-secret-string
 ```
 
@@ -53,13 +53,13 @@ supabase functions deploy verify-customer-otp
 
 ## 4. Supabase Auth setting
 
-Because CoffeeRealm now handles signup OTP, you can turn off Supabase Auth email confirmation if you do not want duplicate Supabase signup emails:
+Because thecoffeerealm now handles signup OTP, you can turn off Supabase Auth email confirmation if you do not want duplicate Supabase signup emails:
 
 ```text
 Authentication > Providers > Email > Confirm email: OFF
 ```
 
-The custom function still creates the user as email-confirmed only after the 6-digit CoffeeRealm OTP is verified.
+The custom function still creates the user as email-confirmed only after the 6-digit thecoffeerealm OTP is verified.
 
 ## Important
 

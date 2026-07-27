@@ -31,7 +31,7 @@ export default function PortalLoginPage() {
   }
 
   return <div className="legacy-portal">
-    <header className="legacy-portal-header"><div className="legacy-portal-brand"><Coffee size={22} fill="currentColor"/><span>the coffee realm</span></div><Lock size={21}/></header>
+    <header className="legacy-portal-header"><div className="legacy-portal-brand"><Coffee size={22} fill="currentColor"/><span>thecoffeerealm</span></div><Lock size={21}/></header>
     <main className="legacy-login-card"><h1>Internal Portal Login</h1><p>Private access for admin, staff, and cashier only.</p><form onSubmit={submit} autoComplete="off">
       <label htmlFor="portal-role">Role</label><div className="legacy-input"><UsersRound size={19}/><select id="portal-role" value={role} onChange={event => setRole(event.target.value)} required><option value="admin">Admin</option><option value="staff">Operations Staff</option><option value="cashier">Cashier</option></select><ChevronDown size={18}/></div>
       <label htmlFor="portal-username">Email</label><div className="legacy-input"><UserRound size={19}/><input id="portal-username" name="username" type="email" placeholder="name@example.com" required autoComplete="username"/></div>
@@ -40,7 +40,7 @@ export default function PortalLoginPage() {
       {message ? <p className="portal-message portal-message-error">{message}</p> : null}
       <button className="legacy-sign-in" type="submit" disabled={loading}><span>{loading ? 'Signing in...' : 'Sign In'}</span><ArrowRight size={19}/></button>
     </form></main>
-    <footer className="legacy-portal-footer"><div><ShieldCheck size={18} fill="currentColor"/><span>Secure Internal Network</span></div><div><strong>the coffee realm</strong><span>(c) 2026 the coffee realm internal systems</span></div></footer>
+    <footer className="legacy-portal-footer"><div><ShieldCheck size={18} fill="currentColor"/><span>Secure Internal Network</span></div><div><strong>thecoffeerealm</strong><span>(c) 2026 thecoffeerealm internal systems</span></div></footer>
   </div>
 }
 

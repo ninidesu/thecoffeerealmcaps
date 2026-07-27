@@ -19,7 +19,7 @@ export default function HomePage() {
 <main>
         <section className="hero landing-hero" id="home">
           <div className="hero-copy">
-            <span className="eyebrow">North Fairview's cozy coffee realm</span>
+            <span className="eyebrow">thecoffeerealm in North Fairview</span>
             <h1>Fresh coffee, homemade sweets, and slow little moments.</h1>
             <p>We serve comforting coffee-based drinks, freshly baked cookies, homemade cakes, pasta, rice meals, toasts, and snacks in a warm neighborhood space.</p>
             <div className="hero-actions">
@@ -32,12 +32,12 @@ export default function HomePage() {
             </div>
           </div>
           <div className="hero-image landing-hero-card">
-            <img src="/images/experience2.png" alt="Warm interior of The Coffee Realm" />
+            <img src="/images/experience2.png" alt="Warm interior of thecoffeerealm" />
             <div className="floating-note"><Clock size={20} /><div><b>Open 10:00 AM - 12:00 MN</b><span>Weekdays and weekends</span></div></div>
           </div>
         </section>
 
-        <section className="marquee" aria-label="Coffee Realm highlights">
+        <section className="marquee" aria-label="thecoffeerealm highlights">
           <span>Homemade cakes</span><i>*</i><span>Fresh cookie boxes</span><i>*</i><span>Coffee-based drinks</span><i>*</i><span>North Fairview cafe</span>
         </section>
 
@@ -49,13 +49,13 @@ export default function HomePage() {
           <div className="product-grid bestsellers-grid">
             {bestSellers.map((item) => <article className="product-card" key={item.id}>
               <div className="product-image"><img src={item.image} alt={item.name} /><span>Best Seller</span></div>
-              <div className="product-body"><small>{item.category}</small><h3>{item.name}</h3><p>{item.description || 'A loved CoffeeRealm favorite from the shop menu.'}</p><div><b>{item.price ? `PHP ${Number(item.price).toFixed(2)}` : 'Menu favorite'}</b><Link to={`/menu/${item.id}`} aria-label={`Customize ${item.name}`}><ArrowRight size={18} /></Link></div></div>
+              <div className="product-body"><small>{item.category}</small><h3>{item.name}</h3><p>{item.description || 'A customer favorite from the shop menu.'}</p><div><b>{item.price ? `PHP ${Number(item.price).toFixed(2)}` : 'Menu favorite'}</b><Link to={`/menu/${item.id}`} aria-label={`Customize ${item.name}`}><ArrowRight size={18} /></Link></div></div>
             </article>)}
           </div>
         </section>
 
         <section className="landing-preorder" id="preorder">
-          <div className="preorder-visual"><img src="/images/menu/BurntBasqueCheesecake.jpg" alt="Coffee Realm cake for pre-order" /></div>
+          <div className="preorder-visual"><img src="/images/menu/BurntBasqueCheesecake.jpg" alt="thecoffeerealm cake for pre-order" /></div>
           <div className="preorder-copy">
             <span className="eyebrow">Pre-order and inquiries</span>
             <h2>Planning a whole cake, cookie box, or coffee run?</h2>
@@ -92,13 +92,13 @@ export default function HomePage() {
 
         <section className="landing-map-section" id="visit">
           <div className="map-copy">
-            <span className="eyebrow">Visit the coffee realm</span>
+            <span className="eyebrow">Visit thecoffeerealm</span>
             <h2>Find us in North Fairview.</h2>
             <p><MapPin size={18} /> {store.address}</p>
             <p><Clock size={18} /> Weekdays and weekends: 10:00 AM to 12:00 MN</p>
             <a className="button button-dark" href={store.map} target="_blank" rel="noreferrer">Get directions</a>
           </div>
-          <div className="map-embed-react"><iframe title="The Coffee Realm North Fairview map" src={mapEmbed} loading="lazy" referrerPolicy="no-referrer-when-downgrade" /></div>
+          <div className="map-embed-react"><iframe title="thecoffeerealm North Fairview map" src={mapEmbed} loading="lazy" referrerPolicy="no-referrer-when-downgrade" /></div>
         </section>
       </main>
 
@@ -127,7 +127,7 @@ export default function HomePage() {
           <p>Order & Payment Policy</p>
           <p>Delivery & Pickup Policy</p>
         </div>
-        <span className="footer-bottom-line">� 2026 the coffee realm. All rights reserved.</span>
+        <span className="footer-bottom-line">© 2026 thecoffeerealm. All rights reserved.</span>
       </footer>
     </div>
   )

@@ -12,7 +12,7 @@ const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const resendApiKey = Deno.env.get("RESEND_API_KEY") || "";
 const otpPepper = Deno.env.get("OTP_PEPPER") || "coffee-realm-dev-pepper";
 const fromEmail = Deno.env.get("MAIL_FROM_EMAIL") || "";
-const fromName = Deno.env.get("MAIL_FROM_NAME") || "the coffee realm";
+const fromName = Deno.env.get("MAIL_FROM_NAME") || "thecoffeerealm";
 const bannerImage = Deno.env.get("MAIL_BANNER_IMAGE") || "https://res.cloudinary.com/dkpdilkin/image/upload/f_auto,q_auto,w_1200/emailbg_miswbo.jpg";
 
 const admin = createClient(supabaseUrl, serviceRoleKey, {
@@ -36,15 +36,15 @@ function buildOtpEmail(type: "registration" | "forgot_password", otp: string, us
   const title = type === "forgot_password" ? "Reset Your Password" : "Verify Your Email";
   const intro = type === "forgot_password"
     ? "We received a request to reset your password. Use the OTP below to continue."
-    : "Thank you for registering with the coffee realm. Use the OTP below to verify your email address.";
+    : "Thank you for registering with thecoffeerealm. Use the OTP below to verify your email address.";
 
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(title)}</title></head>
 <body style="margin:0;padding:0;background-color:#eef3ef;font-family:Arial,Helvetica,sans-serif;color:#1f2f26;">
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#eef3ef;margin:0;padding:0;width:100%;"><tr><td align="center" style="padding:32px 16px;">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;width:100%;"><tr><td style="background-color:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 8px 24px rgba(31,47,38,0.10);">
-      <img src="${escapeHtml(bannerImage)}" alt="the coffee realm Email Banner" width="640" style="display:block;width:100%;max-width:640px;height:auto;border:0;margin:0;padding:0;">
+      <img src="${escapeHtml(bannerImage)}" alt="thecoffeerealm Email Banner" width="640" style="display:block;width:100%;max-width:640px;height:auto;border:0;margin:0;padding:0;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
-        <tr><td style="padding:32px 32px 12px;text-align:center;"><div style="font-size:13px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">the coffee realm</div><div style="font-size:30px;line-height:38px;font-weight:bold;color:#1b2d22;margin:0;">${escapeHtml(title)}</div></td></tr>
+        <tr><td style="padding:32px 32px 12px;text-align:center;"><div style="font-size:13px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">thecoffeerealm</div><div style="font-size:30px;line-height:38px;font-weight:bold;color:#1b2d22;margin:0;">${escapeHtml(title)}</div></td></tr>
         <tr><td style="padding:0 32px 8px;text-align:center;font-size:16px;line-height:26px;color:#4f6358;">${escapeHtml(intro)}</td></tr>
         <tr><td style="padding:8px 32px 8px;text-align:center;font-size:14px;line-height:22px;color:#6a7c71;">Sent to: ${escapeHtml(userEmail)}</td></tr>
         <tr><td align="center" style="padding:18px 32px 10px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr><td align="center" style="background-color:#f4faf3;border:2px dashed #2f5c46;border-radius:16px;padding:16px 28px;"><div style="font-size:12px;line-height:18px;color:#5d6f63;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Your OTP Code</div><div style="font-size:36px;line-height:42px;font-weight:bold;letter-spacing:10px;color:#2f5c46;">${escapeHtml(otp)}</div></td></tr></table></td></tr>
@@ -68,9 +68,9 @@ async function sendOtpEmail(to: string, otp: string) {
     body: JSON.stringify({
       from: `${fromName} <${fromEmail}>`,
       to: [to],
-      subject: "the coffee realm - Verify Your Email",
+      subject: "thecoffeerealm - Verify Your Email",
       html: buildOtpEmail("registration", otp, to),
-      text: `Verify Your Email\n\nYour OTP Code: ${otp}\n\nThis OTP will expire in 5 minutes.\n\nthe coffee realm`,
+      text: `Verify Your Email\n\nYour OTP Code: ${otp}\n\nThis OTP will expire in 5 minutes.\n\nthecoffeerealm`,
     }),
   });
 
