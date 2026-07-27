@@ -12,10 +12,13 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
   const [showLoginPassword, setShowLoginPassword] = useState(false)
   const [showRegisterPassword, setShowRegisterPassword] = useState(false)
   const [forgotOpen, setForgotOpen] = useState(false)
+  const [forgotStep, setForgotStep] = useState('email')
+  const [forgotOtp, setForgotOtp] = useState(Array(otpDigits).fill(''))
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [otpOpen, setOtpOpen] = useState(false)
   const [registeredEmail, setRegisteredEmail] = useState('')
   const [pendingUsername, setPendingUsername] = useState('')
-  const [pendingPassword, setPendingPassword] = useState('')
   const [otpCode, setOtpCode] = useState(Array(otpDigits).fill(''))
   const [authMessage, setAuthMessage] = useState('')
   const [authError, setAuthError] = useState('')
@@ -51,14 +54,16 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     if (!email) return setAuthError('Email address is required.')
     if (password.length < 6 || !/\d/.test(password)) return setAuthError('Password must be at least 6 characters and include at least 1 number.')
     setLoading(true)
-    const { data: otpData, error } = await supabase.functions.invoke('request-customer-otp', {
-      body: { email, username },
+    const { data: signupData, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { username, full_name: username, role: 'customer' } },
     })
     setLoading(false)
-    if (error || otpData?.success === false) return setAuthError(otpData?.error || error?.message || 'Unable to send OTP right now.')
+    if (error) return setAuthError(error.message || 'Unable to send OTP right now.')
+    if (signupData.session) return navigate(location.state?.from || '/menu')
     setRegisteredEmail(email)
     setPendingUsername(username)
-    setPendingPassword(password)
     setOtpCode(Array(otpDigits).fill(''))
     setOtpOpen(true)
     setAuthMessage('We sent a 6-digit thecoffeerealm verification code to your email. Check your inbox to complete registration.')
@@ -70,15 +75,14 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     const token = otpCode.join('')
     if (token.length !== otpDigits) return setAuthError('Enter the 6-digit OTP code.')
     setLoading(true)
-    const { data, error } = await supabase.functions.invoke('verify-customer-otp', {
-      body: { email: registeredEmail, username: pendingUsername, password: pendingPassword, otp: token },
+    const { error } = await supabase.auth.verifyOtp({
+      email: registeredEmail,
+      token,
+      type: 'signup',
     })
     setLoading(false)
-    if (error || data?.success === false) return setAuthError(data?.error || error?.message || 'Unable to verify OTP right now.')
-    const { error: loginError } = await supabase.auth.signInWithPassword({ email: registeredEmail, password: pendingPassword })
-    if (loginError) return setAuthError(loginError.message)
+    if (error) return setAuthError(error.message || 'Unable to verify OTP right now.')
     setOtpOpen(false)
-    setPendingPassword('')
     setAuthMessage(`Account verified. Welcome, ${pendingUsername || 'customer'}!`)
     navigate(location.state?.from || '/menu')
   }
@@ -87,14 +91,11 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     setAuthError('')
     if (!registeredEmail) return setAuthError('Missing email address for verification.')
     setLoading(true)
-    const { data, error } = await supabase.functions.invoke('request-customer-otp', {
-      body: { email: registeredEmail, username: pendingUsername },
-    })
+    const { error } = await supabase.auth.resend({ type: 'signup', email: registeredEmail })
     setLoading(false)
-    if (error || data?.success === false) return setAuthError(data?.error || error?.message || 'Unable to resend OTP right now.')
+    if (error) return setAuthError(error.message || 'Unable to resend OTP right now.')
     setAuthMessage('A new 6-digit verification code was sent.')
   }
-
   async function submitForgotPassword(event) {
     event.preventDefault()
     setAuthError('')
@@ -102,18 +103,74 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     if (!isSupabaseConfigured) return setAuthError('Supabase is not configured yet.')
     if (!forgotEmail.trim()) return setAuthError('Enter your email address first.')
     setLoading(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
-      redirectTo: `${window.location.origin}/login`,
-    })
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim())
     setLoading(false)
     if (error) return setAuthError(error.message)
-    setForgotOpen(false)
-    setAuthMessage('Password reset instructions were sent to your email.')
+    setForgotOtp(Array(otpDigits).fill(''))
+    setForgotStep('otp')
+    setAuthMessage('A 6-digit password reset code was sent to your email.')
   }
 
+  async function verifyForgotOtp() {
+    setAuthError('')
+    const token = forgotOtp.join('')
+    if (token.length !== otpDigits) return setAuthError('Enter the 6-digit OTP code.')
+    setLoading(true)
+    const { error } = await supabase.auth.verifyOtp({ email: forgotEmail.trim(), token, type: 'recovery' })
+    setLoading(false)
+    if (error) return setAuthError(error.message || 'Unable to verify the reset code.')
+    setForgotStep('password')
+    setAuthMessage('')
+  }
+
+  async function submitNewPassword(event) {
+    event.preventDefault()
+    setAuthError('')
+    if (newPassword.length < 6 || !/\d/.test(newPassword)) return setAuthError('Password must be at least 6 characters and include at least 1 number.')
+    if (newPassword !== confirmPassword) return setAuthError('The passwords do not match.')
+    setLoading(true)
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (!error) await supabase.auth.signOut()
+    setLoading(false)
+    if (error) return setAuthError(error.message || 'Unable to update your password.')
+    closeForgotPassword()
+    setAuthMessage('Password changed successfully. You can now log in with your new password.')
+  }
+
+  async function resendForgotOtp() {
+    setAuthError('')
+    setLoading(true)
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim())
+    setLoading(false)
+    if (error) return setAuthError(error.message || 'Unable to resend the reset code.')
+    setAuthMessage('A new 6-digit password reset code was sent.')
+  }
+
+  function openForgotPassword() {
+    setAuthError('')
+    setAuthMessage('')
+    setForgotStep('email')
+    setForgotOtp(Array(otpDigits).fill(''))
+    setNewPassword('')
+    setConfirmPassword('')
+    setForgotOpen(true)
+  }
+
+  function closeForgotPassword() {
+    setForgotOpen(false)
+    setForgotStep('email')
+    setForgotOtp(Array(otpDigits).fill(''))
+    setNewPassword('')
+    setConfirmPassword('')
+  }
   function changeOtpDigit(index, value) {
     const clean = value.replace(/\D/g, '').slice(-1)
     setOtpCode((current) => current.map((digit, digitIndex) => digitIndex === index ? clean : digit))
+  }
+
+  function changeForgotOtpDigit(index, value) {
+    const clean = value.replace(/\D/g, '').slice(-1)
+    setForgotOtp((current) => current.map((digit, digitIndex) => digitIndex === index ? clean : digit))
   }
 
   return (
@@ -131,7 +188,7 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
               <div><Mail size={19} /><input name="email" type="email" placeholder="Enter your email" /></div>
             </label>
             <label className="legacy-auth-input">
-              <span>Password <button type="button" onClick={() => setForgotOpen(true)}>Forgot Password?</button></span>
+              <span>Password <button type="button" onClick={openForgotPassword}>Forgot Password?</button></span>
               <div><Lock size={19} /><input name="password" type={showLoginPassword ? 'text' : 'password'} placeholder="Enter your password" /><button type="button" aria-label="Toggle password visibility" onClick={() => setShowLoginPassword((value) => !value)}>{showLoginPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
             </label>
             <button type="submit" className="legacy-auth-submit" disabled={loading}>{loading ? 'PLEASE WAIT...' : 'LOGIN'}</button>
@@ -155,7 +212,6 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
               <span>Password</span>
               <div><Lock size={19} /><input name="password" type={showRegisterPassword ? 'text' : 'password'} placeholder="Create a password" /><button type="button" aria-label="Toggle password visibility" onClick={() => setShowRegisterPassword((value) => !value)}>{showRegisterPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
             </label>
-            <p className="legacy-auth-hint">thecoffeerealm will send a 6-digit verification code before the customer account is created.</p>
             <button type="submit" className="legacy-auth-submit" disabled={loading}><UserPlus size={18} /> {loading ? 'SENDING...' : 'CREATE ACCOUNT'}</button>
           </form>
         </div>
@@ -176,14 +232,31 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
         </div>
       </section>
 
-      {forgotOpen ? <AuthModal title="Forgot Password" onClose={() => setForgotOpen(false)}>
-        <form onSubmit={submitForgotPassword}>
-          <p>Enter your account email and Supabase will send password reset instructions.</p>
+      {forgotOpen ? <AuthModal title="Reset Password" onClose={closeForgotPassword}>
+        {forgotStep === 'email' ? <form onSubmit={submitForgotPassword}>
+          <p>Enter your account email and we will send a 6-digit password reset code.</p>
+          {authError ? <AuthNotice variant="error" message={authError} /> : null}
           <label className="legacy-auth-input"><span>Email address</span><div><Mail size={19} /><input type="email" value={forgotEmail} onChange={(event) => setForgotEmail(event.target.value)} placeholder="Enter your email" /></div></label>
-          <button type="submit" className="legacy-auth-submit" disabled={loading}>{loading ? 'SENDING...' : 'SEND RESET EMAIL'}</button>
-        </form>
+          <button type="submit" className="legacy-auth-submit" disabled={loading}>{loading ? 'SENDING...' : 'SEND OTP CODE'}</button>
+        </form> : null}
+        {forgotStep === 'otp' ? <div>
+          <div className="legacy-otp-icon"><ShieldCheck size={30} /></div>
+          <p>Enter the 6-digit password reset code sent to <b>{forgotEmail}</b>.</p>
+          {authError ? <AuthNotice variant="error" message={authError} /> : null}
+          {authMessage ? <AuthNotice variant="success" message={authMessage} /> : null}
+          <div className="legacy-otp-inputs" aria-label="Password reset OTP inputs">{forgotOtp.map((digit, index) => <input key={index} value={digit} onChange={(event) => changeForgotOtpDigit(index, event.target.value)} inputMode="numeric" maxLength="1" aria-label={`Reset OTP digit ${index + 1}`} />)}</div>
+          <button type="button" className="legacy-auth-submit" onClick={verifyForgotOtp} disabled={loading}>{loading ? 'VERIFYING...' : 'VERIFY OTP'}</button>
+          <button type="button" className="legacy-auth-link-button" onClick={resendForgotOtp} disabled={loading}>Resend code</button>
+        </div> : null}
+        {forgotStep === 'password' ? <form onSubmit={submitNewPassword}>
+          <p>Your code is verified. Create a new password for your account.</p>
+          {authError ? <AuthNotice variant="error" message={authError} /> : null}
+          <label className="legacy-auth-input"><span>New password</span><div><Lock size={19} /><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="Enter new password" /></div></label>
+          <label className="legacy-auth-input"><span>Confirm new password</span><div><Lock size={19} /><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Repeat new password" /></div></label>
+          <p className="legacy-auth-hint">Use at least 6 characters with at least 1 number.</p>
+          <button type="submit" className="legacy-auth-submit" disabled={loading}>{loading ? 'UPDATING...' : 'UPDATE PASSWORD'}</button>
+        </form> : null}
       </AuthModal> : null}
-
       {otpOpen ? <AuthModal title="Verify your account" onClose={() => setOtpOpen(false)}>
         <div className="legacy-otp-icon"><ShieldCheck size={30} /></div>
         <p>We sent a 6-digit verification code to <b>{registeredEmail}</b>. Enter the code here to create your account.</p>

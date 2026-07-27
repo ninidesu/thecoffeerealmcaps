@@ -31,10 +31,6 @@ export default function HomePage() {
               <span><b>Customer favorites</b> include tiramisu, burnt cheesecake, and cookie boxes.</span>
             </div>
           </div>
-          <div className="hero-image landing-hero-card">
-            <img src="/images/experience2.png" alt="Warm interior of thecoffeerealm" />
-            <div className="floating-note"><Clock size={20} /><div><b>Open 10:00 AM - 12:00 MN</b><span>Weekdays and weekends</span></div></div>
-          </div>
         </section>
 
         <section className="marquee" aria-label="thecoffeerealm highlights">
@@ -70,7 +66,6 @@ export default function HomePage() {
         </section>
 
         <section className="story landing-about" id="about">
-          <div className="story-image"><img src="/images/craft.JPG" alt="Coffee being carefully crafted" /></div>
           <div className="story-copy">
             <span className="eyebrow">About us</span>
             <h2>A cozy place for coffee, cakes, and conversations.</h2>

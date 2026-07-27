@@ -11,6 +11,18 @@ alter table public.orders
   alter column order_sequence set default nextval('public.orders_order_sequence_seq'),
   alter column order_source set default 'customer_pos';
 
+alter table public.orders
+  drop constraint if exists orders_order_source_check;
+alter table public.orders
+  add constraint orders_order_source_check
+  check (order_source is not null and btrim(order_source) <> '');
+
+alter table public.orders
+  drop constraint if exists orders_status_check;
+alter table public.orders
+  add constraint orders_status_check
+  check (status is not null and btrim(status) <> '');
+
 create or replace function public.ensure_order_insert_defaults()
 returns trigger
 language plpgsql
@@ -95,8 +107,8 @@ begin
   end loop;
   grand:=sub+fee;
   insert into public.orders (id,order_number,order_source,order_type,status,customer_id,customer_name,customer_email,customer_phone,delivery_address,delivery_fee,schedule_date,schedule_time,subtotal,final_total,payment_status,payment_confirmed)
-  values (oid,ono,'customer_pos',fulfill,order_status,auth.uid(),c->>'fullName',c->>'email',c->>'contact',case when fulfill='delivery' then concat_ws(', ',c->>'address','Brgy. '||(c->>'barangay'),c->>'city',c->>'province',c->>'postal') else null end,fee,nullif(c->>'scheduleDate','')::date,nullif(c->>'scheduleTime','')::time,sub,grand,case when pay='cod' then 'cod' else 'pending' end,false);
-  insert into public.payments(order_id,method,amount_due,status) values(oid,pay,grand,case when pay='cod' then 'cod' else 'pending' end);
+  values (oid,ono,'customer_pos',fulfill,order_status,auth.uid(),c->>'fullName',c->>'email',c->>'contact',case when fulfill='delivery' then concat_ws(', ',c->>'address','Brgy. '||(c->>'barangay'),c->>'city',c->>'province',c->>'postal') else null end,fee,nullif(c->>'scheduleDate','')::date,nullif(c->>'scheduleTime','')::time,sub,grand,'pending',false);
+  insert into public.payments(order_id,method,amount_due,status) values(oid,pay,grand,'pending');
   for i in select * from jsonb_array_elements(request_payload->'items') loop
     select * into m from public.menu_items where id=(i->>'product_id')::uuid; q:=greatest(1,coalesce((i->>'quantity')::integer,1)); unit:=m.price;
     if nullif(i->>'variation_id','') is not null and m.variant_options?'prices' and (m.variant_options->'prices')?(i->>'variation_id') then unit:=(m.variant_options->'prices'->>(i->>'variation_id'))::numeric; end if;
@@ -127,4 +139,33 @@ revoke all on function public.set_customer_order_status(uuid,text) from public;
 grant execute on function public.create_customer_order(jsonb) to authenticated;
 grant execute on function public.attach_customer_payment_proof(uuid,text) to authenticated;
 grant execute on function public.set_customer_order_status(uuid,text) to authenticated;
+
+-- Customer order privacy and internal operational access.
+alter table public.orders enable row level security;
+alter table public.order_items enable row level security;
+alter table public.payments enable row level security;
+
+drop policy if exists "cashier read orders" on public.orders;
+drop policy if exists "cashier insert walkin orders" on public.orders;
+drop policy if exists "Customers read only their orders" on public.orders;
+create policy "Customers read only their orders" on public.orders for select to authenticated
+using (customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
+create policy "Internal staff insert orders" on public.orders for insert to authenticated
+with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
+
+drop policy if exists "cashier read order items" on public.order_items;
+drop policy if exists "cashier insert order items" on public.order_items;
+drop policy if exists "Customers read only their order items" on public.order_items;
+create policy "Customers read only their order items" on public.order_items for select to authenticated
+using (exists(select 1 from public.orders o where o.id=order_id and (o.customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')))));
+create policy "Internal staff insert order items" on public.order_items for insert to authenticated
+with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
+
+drop policy if exists "cashier read payments" on public.payments;
+drop policy if exists "cashier insert payments" on public.payments;
+drop policy if exists "Customers read only their payments" on public.payments;
+create policy "Customers read only their payments" on public.payments for select to authenticated
+using (exists(select 1 from public.orders o where o.id=order_id and (o.customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')))));
+create policy "Internal staff insert payments" on public.payments for insert to authenticated
+with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
 notify pgrst,'reload schema';
