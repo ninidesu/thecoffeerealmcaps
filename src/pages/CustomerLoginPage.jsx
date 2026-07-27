@@ -1,13 +1,14 @@
 import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck, User, UserPlus } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 const otpDigits = 6
 
-export default function CustomerLoginPage() {
+export default function CustomerLoginPage({ initialMode = 'login' }) {
   const navigate = useNavigate()
-  const [mode, setMode] = useState('login')
+  const location = useLocation()
+  const [mode, setMode] = useState(initialMode)
   const [showLoginPassword, setShowLoginPassword] = useState(false)
   const [showRegisterPassword, setShowRegisterPassword] = useState(false)
   const [forgotOpen, setForgotOpen] = useState(false)
@@ -34,7 +35,7 @@ export default function CustomerLoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     setLoading(false)
     if (error) return setAuthError(error.message)
-    navigate('/menu')
+    navigate(location.state?.from || '/menu')
   }
 
   async function submitRegister(event) {
@@ -79,7 +80,7 @@ export default function CustomerLoginPage() {
     setOtpOpen(false)
     setPendingPassword('')
     setAuthMessage(`Account verified. Welcome, ${pendingUsername || 'customer'}!`)
-    navigate('/menu')
+    navigate(location.state?.from || '/menu')
   }
 
   async function resendOtp() {

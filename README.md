@@ -13,8 +13,7 @@ Private backend secrets, such as service-role keys, SMTP passwords, and Resend k
 | Route | Experience |
 |---|---|
 | `/` | Public landing page and brand story |
-| `/menu` | Searchable customer menu with working cart interactions |
-| `/orders` | Customer order history and live status timeline |
+| `/login` | Customer login, registration, OTP verification, and password reset |
 | `/portal` | Shared role-based login for admin, operational staff, and cashier |
 | `/cashier` | Walk-in POS workspace |
 | `/staff` | Staff sales and operations dashboard |
@@ -36,7 +35,7 @@ Optional: copy `.env.example` to `.env` only if you want to override the built-i
 ```text
 src/
   components/   shared brand, shell, metric, and status UI
-  data/         temporary typed data boundary for prototype content
+  data/         temporary landing-page and dashboard prototype content
   lib/          Supabase client
   pages/        route-level React components
   App.jsx       routing

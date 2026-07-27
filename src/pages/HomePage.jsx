@@ -16,27 +16,14 @@ const mapEmbed = 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3859.012
 export default function HomePage() {
   return (
     <div className="storefront customer-landing">
-      <nav className="store-nav landing-topbar">
-        <Brand />
-        <div className="store-links">
-          <a href="#home">Home</a>
-          <a href="#menu">Menu</a>
-          <a href="#preorder">Pre-order</a>
-          <a href="#about">About</a>
-          <a href="#reviews">Reviews</a>
-          <a href="#visit">Visit</a>
-        </div>
-        <Link className="button button-dark" to="/login">Customer login <ArrowRight size={17} /></Link>
-      </nav>
-
-      <main>
+<main>
         <section className="hero landing-hero" id="home">
           <div className="hero-copy">
             <span className="eyebrow">North Fairview's cozy coffee realm</span>
             <h1>Fresh coffee, homemade sweets, and slow little moments.</h1>
             <p>We serve comforting coffee-based drinks, freshly baked cookies, homemade cakes, pasta, rice meals, toasts, and snacks in a warm neighborhood space.</p>
             <div className="hero-actions">
-              <Link className="button button-light" to="/menu">Explore menu</Link>
+              <Link className="button button-light" to="/menu">View full menu</Link>
               <a className="text-link" href="#preorder">Send a pre-order inquiry <ArrowRight size={17} /></a>
             </div>
             <div className="hero-proof">
@@ -62,7 +49,7 @@ export default function HomePage() {
           <div className="product-grid bestsellers-grid">
             {bestSellers.map((item) => <article className="product-card" key={item.id}>
               <div className="product-image"><img src={item.image} alt={item.name} /><span>Best Seller</span></div>
-              <div className="product-body"><small>{item.category}</small><h3>{item.name}</h3><p>{item.description || 'A loved CoffeeRealm favorite from the shop menu.'}</p><div><b>{item.price ? `PHP ${Number(item.price).toFixed(2)}` : 'Menu favorite'}</b><Link to="/menu" aria-label={`View ${item.name}`}><ArrowRight size={18} /></Link></div></div>
+              <div className="product-body"><small>{item.category}</small><h3>{item.name}</h3><p>{item.description || 'A loved CoffeeRealm favorite from the shop menu.'}</p><div><b>{item.price ? `PHP ${Number(item.price).toFixed(2)}` : 'Menu favorite'}</b><Link to={`/menu/${item.id}`} aria-label={`Customize ${item.name}`}><ArrowRight size={18} /></Link></div></div>
             </article>)}
           </div>
         </section>
@@ -140,7 +127,7 @@ export default function HomePage() {
           <p>Order & Payment Policy</p>
           <p>Delivery & Pickup Policy</p>
         </div>
-        <span className="footer-bottom-line">© 2026 the coffee realm. All rights reserved.</span>
+        <span className="footer-bottom-line">ï¿½ 2026 the coffee realm. All rights reserved.</span>
       </footer>
     </div>
   )
