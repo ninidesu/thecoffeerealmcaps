@@ -5,12 +5,11 @@ import {
   Landmark,
   LogOut,
   Minus,
+  Pencil,
   Plus,
   ReceiptText,
   Search,
   ShoppingBag,
-  Trash2,
-  UserRound,
   Wallet,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -122,7 +121,7 @@ function productOptionDefaults(product) {
     return {
       allowSugar: false,
       allowIce: false,
-      allowAddons: false,
+      allowAddons: truthy(product.allowAddons) || isFood,
       temperatureType: '',
       variantConfig,
       variantOptions,
@@ -132,7 +131,7 @@ function productOptionDefaults(product) {
   return {
     allowSugar: truthy(product.allowSugar) || isDrink,
     allowIce: truthy(product.allowIce) || ['cold', 'both'].includes(inferredTemperature),
-    allowAddons: truthy(product.allowAddons) || isDrink,
+    allowAddons: truthy(product.allowAddons) || isDrink || isFood,
     temperatureType: inferredTemperature,
     variantConfig,
     variantOptions,
@@ -166,8 +165,15 @@ function normalizeOrder(row) {
     customerName: row.customer_name || row.full_name || 'Walk-in Customer',
     subtotal: Number(row.subtotal || row.discount_subtotal || row.final_total || 0),
     discountAmount: Number(row.discount_amount || 0),
+    discountType: row.discount_type || '',
     total: Number(row.final_total || row.subtotal || 0),
-    paymentMethod: payment?.method || 'Cash',
+    paymentMethod: payment?.method || row.payment_method || 'Cash',
+    paymentReference: payment?.reference_number || row.payment_reference || '',
+    bankName: payment?.bank_name || row.bank_name || '',
+    cashReceived: Number(payment?.amount_received ?? row.amount_received ?? 0),
+    change: Number(payment?.change_amount ?? row.change_amount ?? 0),
+    discountCustomerName: row.discount_customer_name || '',
+    discountIdNumber: row.discount_id_number || '',
     createdAt: row.created_at,
     items,
   }
@@ -176,10 +182,9 @@ function normalizeOrder(row) {
 function validatePayment(payment, total) {
   if (payment.method === 'Cash') {
     const received = Number(payment.cashReceived || 0)
-    if (received < total) return 'Cash received must be equal to or greater than the total.'
+    if (!payment.cashReceived || received < total) return 'Amount paid must be equal to or greater than the total.'
   }
   if (payment.method === 'GCash') {
-    if (!/^09\d{9}$/.test(payment.accountNumber || '')) return 'GCash account number must start with 09 and be exactly 11 digits.'
     if (!/^\d{13}$/.test(payment.referenceNumber || '')) return 'GCash reference number must be exactly 13 digits.'
   }
   if (payment.method === 'Bank Transfer') {
@@ -209,6 +214,9 @@ export default function CashierPage() {
   const [receipt, setReceipt] = useState(null)
   const [customizingProduct, setCustomizingProduct] = useState(null)
   const [showTransactions, setShowTransactions] = useState(false)
+  const [transactionDetails, setTransactionDetails] = useState(null)
+  const [showCheckout, setShowCheckout] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [error, setError] = useState('')
   const [cashierProfile, setCashierProfile] = useState(null)
 
@@ -239,11 +247,32 @@ export default function CashierPage() {
       setLoading(false)
     }
     loadCashierData()
-    return () => {
+    async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await document.documentElement.requestFullscreen()
+    } catch {
+      setError('Fullscreen is not available in this browser.')
+    }
+  }
+  return () => {
       ignore = true
     }
   }, [fallbackProducts])
 
+  useEffect(() => {
+    const syncFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', syncFullscreen)
+    async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await document.documentElement.requestFullscreen()
+    } catch {
+      setError('Fullscreen is not available in this browser.')
+    }
+  }
+  return () => document.removeEventListener('fullscreenchange', syncFullscreen)
+  }, [])
   const activeOrder = orderTabs.find((tab) => tab.id === activeOrderId) || orderTabs[0] || createOrderTab(1)
   const cart = activeOrder.cart
   const customerName = activeOrder.customerName
@@ -276,7 +305,7 @@ export default function CashierPage() {
     return matchesCategory && haystack.includes(search.trim().toLowerCase())
   }), [category, products, search])
   const subtotal = cart.reduce((sum, item) => sum + itemLineTotal(item), 0)
-  const discountSubtotal = cart.reduce((sum, item) => sum + (item.isDiscounted ? itemLineTotal(item) : 0), 0)
+  const discountSubtotal = discount.enabled ? subtotal : 0
   const discountAmount = discount.enabled ? discountSubtotal * 0.2 : 0
   const total = Math.max(0, subtotal - discountAmount)
   const change = payment.method === 'Cash' ? Math.max(0, Number(payment.cashReceived || 0) - total) : 0
@@ -310,8 +339,7 @@ export default function CashierPage() {
   }
 
   function shouldCustomize(product) {
-    const kind = `${product.itemType} ${product.category} ${product.name}`.toLowerCase()
-    return Boolean(product.allowSugar || product.allowIce || product.allowAddons || product.temperatureType || /coffee|tea|drink|latte|matcha|frappe|americano|espresso|milk/.test(kind))
+    return true
   }
 
   function addConfiguredItem(product, customizations = {}, addons = [], quantity = 1) {
@@ -337,8 +365,17 @@ export default function CashierPage() {
   }
 
   function editCartItem(item) {
-    setCart((current) => current.filter((line) => line.lineKey !== item.lineKey))
     setCustomizingProduct(item)
+  }
+
+  function updateConfiguredItem(item, customizations, addons, quantity) {
+    setCart((current) => {
+      const withoutOriginal = current.filter((line) => line.lineKey !== item.lineKey)
+      const lineKey = makeLineKey(item, customizations, addons)
+      const existing = withoutOriginal.find((line) => line.lineKey === lineKey)
+      if (existing) return withoutOriginal.map((line) => line.lineKey === lineKey ? { ...line, qty: line.qty + quantity } : line)
+      return [...withoutOriginal, { ...item, lineKey, qty: quantity, customizations, addons }]
+    })
   }
   async function saveOrder() {
     setError('')
@@ -346,7 +383,6 @@ export default function CashierPage() {
     if (discount.enabled) {
       if (!['PWD', 'Senior'].includes(discount.type)) return setError('Select PWD or Senior discount type.')
       if (!discount.customerName.trim() || !discount.idNumber.trim()) return setError('Discount customer name and ID number are required.')
-      if (!cart.some((item) => item.isDiscounted)) return setError('Select at least one cart item for discount.')
     }
     const validationError = validatePayment(payment, total)
     if (validationError) return setError(validationError)
@@ -360,9 +396,9 @@ export default function CashierPage() {
       discountAmount,
       paymentMethod: payment.method,
       paymentReference: payment.method !== 'Cash' ? payment.referenceNumber : '',
-      accountNumber: payment.method === 'GCash' ? payment.accountNumber : '',
+      accountNumber: '',
       bankName: payment.method === 'Bank Transfer' ? payment.bankName : '',
-      cashReceived: payment.method === 'Cash' ? Number(payment.cashReceived || 0) : total,
+      cashReceived: payment.method === 'Cash' ? Number(payment.cashReceived || total) : total,
       change,
       discountType: discount.enabled ? discount.type : '',
       discountCustomerName: discount.enabled ? discount.customerName : '',
@@ -378,7 +414,7 @@ export default function CashierPage() {
       setTransactions((current) => [orderDraft, ...current])
       setReceipt(orderDraft)
       setCart([])
-      return
+      return true
     }
 
     const orderPayload = {
@@ -406,10 +442,11 @@ export default function CashierPage() {
     const orderItems = cart.map((item) => ({
       order_id: savedOrder.id,
       menu_item_id: item.id,
+      item_name: item.name,
       unit_price: lineUnitPrice(item),
       quantity: item.qty,
       line_total: itemLineTotal(item),
-      is_discounted: item.isDiscounted,
+      is_discounted: Boolean(item.isDiscounted),
       discount_amount: item.isDiscounted ? itemLineTotal(item) * 0.2 : 0,
       customizations: item.customizations || {},
       addons: item.addons || [],
@@ -417,14 +454,15 @@ export default function CashierPage() {
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
     if (itemsError) return setError(`Order saved, but items were not saved: ${itemsError.message}`)
 
+    const paymentMethodCode = { Cash: 'cash', GCash: 'gcash', 'Bank Transfer': 'bank_transfer' }[payment.method] || 'cash'
     const paymentPayload = {
       order_id: savedOrder.id,
-      method: payment.method,
+      method: paymentMethodCode,
       amount_due: total,
-      amount_received: payment.method === 'Cash' ? Number(payment.cashReceived || 0) : total,
+      amount_received: payment.method === 'Cash' ? Number(payment.cashReceived || total) : total,
       change_amount: change,
       reference_number: payment.method !== 'Cash' ? payment.referenceNumber : null,
-      account_number: payment.method === 'GCash' ? payment.accountNumber : null,
+      account_number: null,
       bank_name: payment.method === 'Bank Transfer' ? payment.bankName : null,
       status: 'paid',
       paid_at: new Date().toISOString(),
@@ -439,18 +477,35 @@ export default function CashierPage() {
     setCustomerName('')
     setDiscount(emptyDiscount())
     setPayment(emptyPayment())
+    return true
   }
   async function logout() {
     await signOutPortal()
     navigate('/portal', { replace: true })
   }
 
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await document.documentElement.requestFullscreen()
+    } catch {
+      setError('Fullscreen is not available in this browser.')
+    }
+  }
+  async function openTransactionDetails(order) {
+    if (order.items?.length || !isSupabaseConfigured || !order.id) {
+      setTransactionDetails(order)
+      return
+    }
+    const { data, error: detailsError } = await supabase.from('order_items').select('*').eq('order_id', order.id).order('id')
+    setTransactionDetails({ ...order, items: detailsError ? [] : (data || []) })
+  }
   return (
-    <div className="legacy-cashier">
+    <div className={`cashier-v2 legacy-cashier ${isFullscreen ? 'cashier-is-fullscreen' : ''}`}>
       <header className="legacy-cashier-top">
         <div className="cashier-top-left">
           <img src="/images/coffeerealmlogo.png" alt="thecoffeerealm logo" />
-          <strong>thecoffeerealm point of sales for walk-in orders</strong>
+          <div><span className="cashier-kicker">Walk-in point of sale</span><strong>the coffee realm</strong></div>
         </div>
         <div className="cashier-time">
           <span>{new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
@@ -471,40 +526,38 @@ export default function CashierPage() {
                 <button type="button" className="cashier-tab-close" onClick={() => closeOrderTab(tab.id)} aria-label={`Close ${tab.id}`}>&times;</button>
               </div>)}
             </div>
-            <button type="button" className="cashier-new-order" onClick={openNewOrderTab} disabled={orderTabs.length >= 3}><Plus size={18} /> New Order</button>
           </div>
           <div className="legacy-pos-heading">
             <div>
-              <div className="cashier-menu-title-row"><h1>Menu</h1><button type="button"><Expand size={16} /> Fullscreen</button></div>
-              <p>{loading ? 'Loading Supabase menu...' : `Select items for ${activeOrder.id}.`}</p>
+              <div className="cashier-menu-title-row"><div className="cashier-menu-title"><h1>Menu</h1><button type="button" className="cashier-fullscreen" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}><Expand size={16} /> <span>{isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}</span></button></div><div className="cashier-menu-actions"><button type="button" className="cashier-new-order" onClick={openNewOrderTab} disabled={orderTabs.length >= 3}><Plus size={18} /> New Order</button></div></div>
             </div>
-            <label><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search menu items" /></label>
+            
           </div>
           {notice ? <div className="cashier-sync-note">{notice}</div> : null}
-          <CategoryTabs categories={categories} active={category} onChange={setCategory} />
+          <div className="cashier-menu-controls"><label><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search menu items" /></label><CategoryTabs categories={categories} active={category} onChange={setCategory} /></div>
           <ProductGrid products={filteredProducts} onAdd={addToCart} />
           {!loading && filteredProducts.length === 0 ? <div className="cashier-empty-state"><Search size={28} /><b>No menu items found</b><span>Try another category or search term.</span></div> : null}
         </section>
 
         <aside className="legacy-ticket">
           <header>
-            <div><ShoppingBag size={20} /><span><b>{activeOrder.id}</b></span></div>
+            <div><span className="cashier-order-icon"><ShoppingBag size={18} /></span><span><small>Current order</small><b>{activeOrder.id}</b></span></div>
             <button type="button" className="cashier-clear-cart" onClick={() => setCart([])}>Clear Cart</button>
           </header>
-          <div className="cashier-cart-count"><span>Items</span><b>({cartCount})</b></div>
-          <POSCart cart={cart} discountEnabled={discount.enabled} onQty={changeQty} onEdit={editCartItem} onDiscount={(lineKey) => setCart((current) => current.map((item) => item.lineKey === lineKey ? { ...item, isDiscounted: !item.isDiscounted } : item))} onRemove={(lineKey) => setCart((current) => current.filter((item) => item.lineKey !== lineKey))} />
+          <div className="cashier-cart-count"><span>Items</span><b>{cartCount}</b></div>
+          <POSCart cart={cart} onQty={changeQty} onEdit={editCartItem} />
           <div className="cashier-checkout-block">
-            <DiscountPanel discount={discount} setDiscount={setDiscount} />
-            <PaymentPanel payment={payment} setPayment={setPayment} total={total} change={change} />
-            <OrderSummary subtotal={subtotal} discountAmount={discountAmount} total={total} />
+            <OrderSummary subtotal={subtotal} total={total} />
             {error ? <div className="cashier-error">{error}</div> : null}
-            <button type="button" className="legacy-charge" onClick={saveOrder} disabled={!cart.length}>Save Order</button>
+            <button type="button" className="legacy-charge" onClick={() => setShowCheckout(true)} disabled={!cart.length}>Checkout</button>
           </div>
         </aside>
       </main>
 
-      {customizingProduct ? <ItemCustomizationModal product={customizingProduct} onClose={() => setCustomizingProduct(null)} onAdd={(customizations, addons, quantity) => { addConfiguredItem(customizingProduct, customizations, addons, quantity); setCustomizingProduct(null) }} /> : null}
-      {showTransactions ? <CashierTransactionsModal transactions={transactions} onClose={() => setShowTransactions(false)} onOpenReceipt={(order) => { setReceipt(order); setShowTransactions(false) }} /> : null}
+      {showCheckout ? <CheckoutModal cart={cart} subtotal={subtotal} total={total} discount={discount} setDiscount={setDiscount} payment={payment} setPayment={setPayment} change={change} error={error} onCancel={() => { setShowCheckout(false); setError('') }} onConfirm={async () => { if (await saveOrder()) setShowCheckout(false) }} /> : null}
+      {customizingProduct ? <ItemCustomizationModal product={customizingProduct} onClose={() => setCustomizingProduct(null)} onAdd={(customizations, addons, quantity) => { updateConfiguredItem(customizingProduct, customizations, addons, quantity); setCustomizingProduct(null) }} /> : null}
+      {showTransactions ? <CashierTransactionsModal transactions={transactions} onClose={() => setShowTransactions(false)} onViewDetails={openTransactionDetails} onOpenReceipt={(order) => { setReceipt(order); setShowTransactions(false) }} /> : null}
+      {transactionDetails ? <TransactionDetailsModal order={transactionDetails} onBack={() => setTransactionDetails(null)} onClose={() => { setTransactionDetails(null); setShowTransactions(false) }} /> : null}
       {receipt ? <CashierReceipt order={receipt} onClose={() => setReceipt(null)} /> : null}
     </div>
   )
@@ -517,36 +570,40 @@ function CategoryTabs({ categories, active, onChange }) {
 function ProductGrid({ products, onAdd }) {
   return <div className="legacy-pos-products">{products.map((item) => {
     const hasOptions = Boolean(item.allowSugar || item.allowIce || item.allowAddons || item.temperatureType || item.variantOptions?.length)
-    return <article key={item.id} className={!item.price || !item.isAvailable ? 'unpriced' : ''}>
+    return <article key={item.id} className={!item.price || !item.isAvailable ? 'unpriced' : 'cashier-product-card'} role={!item.price || !item.isAvailable ? undefined : 'button'} tabIndex={!item.price || !item.isAvailable ? undefined : 0} onClick={() => { if (item.price && item.isAvailable) onAdd(item) }} onKeyDown={(event) => { if (item.price && item.isAvailable && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onAdd(item) } }}>
       <img src={item.image} alt={item.name} />
       <div className="cashier-product-body">
         <small>{item.category}{hasOptions ? ' / Customizable' : ''}</small>
         <h3>{item.name}</h3>        <footer>
           <strong>{item.price ? peso(item.price) : 'No price set'}</strong>
-          <button type="button" disabled={!item.price || !item.isAvailable} onClick={() => onAdd(item)} aria-label={`Add ${item.name}`}><Plus size={18} /></button>
+          <button type="button" disabled={!item.price || !item.isAvailable} onClick={(event) => { event.stopPropagation(); onAdd(item) }} aria-label={`Add ${item.name}`}><Plus size={18} /></button>
         </footer>
       </div>
     </article>
   })}</div>
 }
 
-function POSCart({ cart, discountEnabled, onQty, onDiscount, onRemove, onEdit }) {
+function POSCart({ cart, onQty, onEdit }) {
   return <div className="legacy-ticket-items">{cart.length === 0 ? <p>No items added yet.</p> : cart.map((item) => {
     const editable = Boolean(item.allowSugar || item.allowIce || item.allowAddons || item.temperatureType || item.variantOptions?.length)
     return <article key={item.lineKey}>
       <img src={item.image} alt={item.name} />
-      <div>
-        <b>{item.name}</b>
-        <small>{item.category}</small>
-        <CustomizationSummary item={item} />
-        {discountEnabled ? <label className="cashier-discount-line"><input type="checkbox" checked={item.isDiscounted} onChange={() => onDiscount(item.lineKey)} /> Discount</label> : null}
-        <span><button type="button" onClick={() => onQty(item.lineKey, -1)}><Minus size={13} /></button>{item.qty}<button type="button" onClick={() => onQty(item.lineKey, 1)}><Plus size={13} /></button></span>
-      </div>
-      <div className="cashier-line-price-actions">
-        <strong>{peso(itemLineTotal(item))}</strong>
-        <div className="cashier-line-actions">
-          {editable ? <button type="button" onClick={() => onEdit(item)}>Edit</button> : null}
-          <button type="button" className="cashier-remove-line" onClick={() => onRemove(item.lineKey)}><Trash2 size={14} /> Remove</button>
+      <div className="cashier-line-body">
+        <div className="cashier-line-top">
+          <div>
+            <b>{item.name}</b>
+            <small>{item.category}</small>
+            <CustomizationSummary item={item} />
+          </div>
+          <div className="cashier-line-price-actions">
+            <strong>{peso(itemLineTotal(item))}</strong>
+          </div>
+        </div>
+        <div className="cashier-line-bottom">
+          <span className="cashier-qty-stepper"><button type="button" onClick={() => onQty(item.lineKey, -1)}><Minus size={13} /></button>{item.qty}<button type="button" onClick={() => onQty(item.lineKey, 1)}><Plus size={13} /></button></span>
+          <span className="cashier-line-bottom-actions">
+            {editable ? <button type="button" className="cashier-edit-line" onClick={() => onEdit(item)}><Pencil size={14} /> Edit</button> : null}
+          </span>
         </div>
       </div>
     </article>
@@ -619,14 +676,14 @@ function ItemCustomizationModal({ product, onClose, onAdd }) {
         <div className="modern-pos-column">
           {variantOptions.length ? <VariantGroup title={variantTitle} options={variantOptions} value={selectedVariant} onChange={setSelectedVariant} /> : null}
           {temperatureOptions.length ? <OptionGroup title="Temperature" options={temperatureOptions} value={temperature} onChange={chooseTemperature} /> : null}
+          {product.allowIce && isCold ? <OptionGroup title="Ice level" options={['Less Ice', 'Default Ice', 'More Ice']} value={iceLevel} onChange={setIceLevel} /> : null}
           {product.allowSugar ? <OptionGroup title="Sugar level" options={['0% Sugar', '25% Sugar', '50% Sugar', '75% Sugar', '100% Sugar']} value={sugarLevel} onChange={setSugarLevel} /> : null}
         </div>
         <div className="modern-pos-column">
-          {product.allowIce && isCold ? <OptionGroup title="Ice level" options={['Less Ice', 'Default Ice', 'More Ice']} value={iceLevel} onChange={setIceLevel} /> : null}
           {product.allowAddons ? <div className="cashier-option-group modern-addon-group"><h3>Add-ons</h3><div className="cashier-option-grid cashier-addon-grid modern-addon-list">{defaultAddonOptions.map((option) => {
             const selected = addons.some((item) => item.name === option.name)
             return <button type="button" className={selected ? 'active' : ''} key={option.name} onClick={() => toggleAddon(option)}>
-              <span>{selected ? <i>?</i> : null}{option.name}</span>
+              <span>{selected ? <i>&#10003;</i> : null}{option.name}</span>
               <b>+{peso(option.price)}</b>
             </button>
           })}</div></div> : null}
@@ -654,35 +711,129 @@ function VariantGroup({ title, options, value, onChange }) {
 }
 
 function PaymentPanel({ payment, setPayment, total, change }) {
-  return <section className="cashier-panel"><div className="cashier-payment-methods">{paymentMethods.map(({ value, label, icon: Icon }) => <button type="button" className={payment.method === value ? 'active' : ''} key={value} onClick={() => setPayment((current) => ({ ...current, method: value }))}><Icon size={18} /> {label}</button>)}</div>{payment.method === 'Cash' ? <div className="cashier-form-grid"><input type="number" min="0" step="0.01" value={payment.cashReceived} onChange={(event) => setPayment((current) => ({ ...current, cashReceived: event.target.value }))} placeholder="Cash received" /><input readOnly value={`Change: ${peso(change)}`} /></div> : null}{payment.method === 'GCash' ? <div className="cashier-form-grid"><input value={payment.accountNumber} onChange={(event) => setPayment((current) => ({ ...current, accountNumber: event.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="09XXXXXXXXX" /><input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit reference" /></div> : null}{payment.method === 'Bank Transfer' ? <div className="cashier-form-grid"><input value={payment.bankName} onChange={(event) => setPayment((current) => ({ ...current, bankName: event.target.value }))} placeholder="Bank name" /><input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 30) }))} placeholder="Transfer reference" /></div> : null}</section>
+  return <section className="cashier-panel"><div className="cashier-payment-methods">{paymentMethods.map(({ value, label, icon: Icon }) => <button type="button" className={payment.method === value ? 'active' : ''} key={value} onClick={() => setPayment((current) => ({ ...current, method: value }))}><Icon size={18} /> {label}</button>)}</div>{payment.method === 'Cash' ? <div className="cashier-form-grid"><input type="number" min={total} step="0.01" value={payment.cashReceived} onChange={(event) => setPayment((current) => ({ ...current, cashReceived: event.target.value }))} placeholder="Cash received" /><input readOnly value={`Change: ${peso(change)}`} /></div> : null}{payment.method === 'GCash' ? <div className="cashier-form-grid"><input value={payment.accountNumber} onChange={(event) => setPayment((current) => ({ ...current, accountNumber: event.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="09XXXXXXXXX" /><input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit reference" /></div> : null}{payment.method === 'Bank Transfer' ? <div className="cashier-form-grid"><input value={payment.bankName} onChange={(event) => setPayment((current) => ({ ...current, bankName: event.target.value }))} placeholder="Bank name" /><input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 30) }))} placeholder="Transfer reference" /></div> : null}</section>
 }
 
-function OrderSummary({ subtotal, discountAmount, total }) {
-  return <div className="legacy-ticket-total"><p><span>Subtotal</span><b>{peso(subtotal)}</b></p><p><span>Discount</span><span>-{peso(discountAmount)}</span></p><hr /><p><strong>Total</strong><strong>{peso(total)}</strong></p></div>
+function OrderSummary({ subtotal, total }) {
+  return <div className="legacy-ticket-total"><p><span>Subtotal</span><b>{peso(subtotal)}</b></p><hr /><p><strong>Total</strong><strong>{peso(total)}</strong></p></div>
 }
 
-function CashierTransactionsModal({ transactions, onOpenReceipt, onClose }) {
-  return <div className="cashier-transactions-backdrop" role="dialog" aria-modal="true" aria-label="Cashier transaction history">
-    <section className="cashier-transactions-modal">
-      <header>
-        <div>
-          <span>Cashier records</span>
-          <h2>Transaction History</h2>
+
+function CheckoutModal({ cart, subtotal, total, discount, setDiscount, payment, setPayment, change, error, onCancel, onConfirm }) {
+  const discountChoices = ['No Discount', 'PWD', 'Senior']
+  const paymentChoices = [
+    { value: 'Cash', label: 'Cash', icon: Banknote },
+    { value: 'GCash', label: 'GCash', icon: Wallet },
+    { value: 'Bank Transfer', label: 'Bank', icon: Landmark },
+  ]
+  const activeDiscount = discount.enabled ? discount.type : 'No Discount'
+
+  function chooseDiscount(choice) {
+    if (choice === 'No Discount') {
+      setDiscount(emptyDiscount())
+      return
+    }
+    setDiscount((current) => ({ ...current, enabled: true, type: choice }))
+  }
+
+  return <div className="checkout-backdrop" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+    <section className="checkout-modal">
+      <header className="checkout-modal-head">
+        <div className="checkout-modal-head-left">
+          <span className="checkout-modal-icon"><ReceiptText size={20} /></span>
+          <div><span className="cashier-kicker">Review order</span><h2 id="checkout-title">Checkout</h2></div>
         </div>
-        <button type="button" onClick={onClose} aria-label="Close transaction history">&times;</button>
+        <button type="button" onClick={onCancel} aria-label="Close checkout">&times;</button>
       </header>
-      <div className="cashier-transactions-list">
-        {transactions.length === 0 ? <div className="cashier-empty-state"><ReceiptText size={28} /><b>No walk-in transactions yet</b><span>Completed orders will appear here after saving.</span></div> : transactions.map((order) => <article key={order.id}>
-          <div><b>{order.orderNumber}</b><span>{formatReceiptDate(order.createdAt)}</span></div>
-          <span>{order.customerName}</span>
-          <strong>{peso(order.total)}</strong>
-          <button type="button" onClick={() => onOpenReceipt(order)}>View receipt</button>
-        </article>)}
+      <div className="checkout-modal-body">
+        <section className="checkout-review-list" aria-label="Order items">
+          {cart.map((item) => <article key={item.lineKey}>
+            <div><b>{item.name}</b><span>{customizationDetails(item).join(' / ') || 'Standard preparation'}</span></div>
+            <span className="checkout-quantity">&times;{item.qty}</span>
+            <strong>{peso(itemLineTotal(item))}</strong>
+          </article>)}
+        </section>
+        <section className="checkout-totals"><p><span>Subtotal</span><b>{peso(subtotal)}</b></p><p><strong>Total</strong><strong>{peso(total)}</strong></p></section>
+        <section className="checkout-section"><h3>Discount</h3><div className="checkout-choice-grid">{discountChoices.map((choice) => <button type="button" key={choice} className={activeDiscount === choice ? 'active' : ''} onClick={() => chooseDiscount(choice)}>{choice}</button>)}</div>
+          {discount.enabled ? <div className="checkout-field-grid"><label>Name<input value={discount.customerName} onChange={(event) => setDiscount((current) => ({ ...current, customerName: event.target.value }))} placeholder="Customer name" /></label><label>ID number<input value={discount.idNumber} onChange={(event) => setDiscount((current) => ({ ...current, idNumber: event.target.value }))} placeholder="PWD or senior ID" /></label></div> : null}
+        </section>
+        <section className="checkout-section"><h3>Payment</h3><div className="checkout-choice-grid checkout-payment-grid">{paymentChoices.map(({ value, label, icon: Icon }) => <button type="button" key={value} className={payment.method === value ? 'active' : ''} onClick={() => setPayment((current) => ({ ...current, method: value }))}><Icon size={17} />{label}</button>)}</div>
+          {payment.method === 'Cash' ? <div className="checkout-field-grid"><label>Amount paid<input type="number" min={total} step="0.01" value={payment.cashReceived} onChange={(event) => setPayment((current) => ({ ...current, cashReceived: event.target.value }))} placeholder={peso(total)} /></label><label>Change<input readOnly value={peso(change)} /></label></div> : null}
+          {payment.method === 'GCash' ? <div className="checkout-field-grid checkout-one-field"><label>Reference number<input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit reference number" /></label></div> : null}
+          {payment.method === 'Bank Transfer' ? <div className="checkout-field-grid"><label>Bank name<input value={payment.bankName} onChange={(event) => setPayment((current) => ({ ...current, bankName: event.target.value }))} placeholder="Bank name" /></label><label>Reference number<input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 30) }))} placeholder="Reference number" /></label></div> : null}
+        </section>
       </div>
+      {error ? <div className="checkout-error">{error}</div> : null}
+      <footer className="checkout-actions"><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={onConfirm}>Confirm order</button></footer>
+    </section>
+  </div>
+}
+function CashierTransactionsModal({ transactions, onViewDetails, onOpenReceipt, onClose }) {
+  const [query, setQuery] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState('All')
+  const [periodFilter, setPeriodFilter] = useState('All time')
+  const [discountFilter, setDiscountFilter] = useState('All discounts')
+  const [sortOrder, setSortOrder] = useState('recent')
+  const [page, setPage] = useState(1)
+  const visibleTransactions = transactions.filter((order) => {
+    const matchesQuery = `${order.orderNumber} ${order.customerName} ${order.paymentMethod}`.toLowerCase().includes(query.trim().toLowerCase())
+    const method = String(order.paymentMethod || '').toLowerCase().replace(/\s+/g, '_')
+    const matchesPayment = paymentFilter === 'All' || method === paymentFilter
+    const createdAt = new Date(order.createdAt).getTime()
+    const orderDate = new Date(createdAt)
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1)
+    const matchesPeriod = periodFilter === 'All time' || Number.isNaN(createdAt) || (periodFilter === 'Today' ? orderDate.toDateString() === new Date().toDateString() : periodFilter === 'Yesterday' ? orderDate.toDateString() === yesterday.toDateString() : Date.now() - createdAt <= 604800000)
+    const discountType = String(order.discountType || '').toLowerCase()
+    const matchesDiscount = discountFilter === 'All discounts' || (discountFilter === 'No discount' ? !Number(order.discountAmount || 0) : discountType === discountFilter.toLowerCase())
+    return matchesQuery && matchesPayment && matchesPeriod && matchesDiscount
+  }).sort((first, second) => {
+    const firstDate = new Date(first.createdAt).getTime() || 0
+    const secondDate = new Date(second.createdAt).getTime() || 0
+    return sortOrder === 'recent' ? secondDate - firstDate : firstDate - secondDate
+  })
+  const pageSize = 8
+  const totalPages = Math.max(1, Math.ceil(visibleTransactions.length / pageSize))
+  const currentPage = Math.min(page, totalPages)
+  const pageStart = (currentPage - 1) * pageSize
+  const pageTransactions = visibleTransactions.slice(pageStart, pageStart + pageSize)
+  const pageNumbers = Array.from({ length: Math.min(3, totalPages) }, (_, index) => index + 1)
+  useEffect(() => { if (page !== currentPage) setPage(currentPage) }, [page, currentPage])
+  const label = (method) => ({ cash: 'Cash', gcash: 'GCash', bank_transfer: 'Bank transfer' }[String(method || '').toLowerCase()] || method || 'Cash')
+  return <div className="cashier-transactions-backdrop" role="dialog" aria-modal="true" aria-labelledby="transactions-title">
+    <section className="cashier-transactions-modal">
+      <header><div><span>Cashier records</span><h2 id="transactions-title">Transaction History</h2></div><button type="button" onClick={onClose} aria-label="Close transaction history">&times;</button></header>
+      <div className="transaction-toolbar">
+        <label className="transaction-search"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search order, customer, or payment" /></label>
+        <div className="transaction-filters"><select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} aria-label="Sort transactions"><option value="recent">Most Recent</option><option value="oldest">Oldest</option></select><select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)} aria-label="Payment method"><option value="All">All payments</option><option value="cash">Cash</option><option value="gcash">GCash</option><option value="bank_transfer">Bank transfer</option></select><select value={discountFilter} onChange={(event) => setDiscountFilter(event.target.value)} aria-label="Discount type"><option>All discounts</option><option>No discount</option><option>PWD</option><option>Senior</option></select><select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)} aria-label="Time period"><option>All time</option><option>Today</option><option>Yesterday</option><option>Last 7 days</option></select></div>
+      </div>
+      <div className="transaction-list-heading"><span>Order ID</span><span>Payment</span><span>Amount</span><span>Actions</span></div>
+      <div className="cashier-transactions-list">{visibleTransactions.length === 0 ? <div className="cashier-empty-state"><ReceiptText size={28} /><b>No transactions found</b><span>Try another search term or filter.</span></div> : pageTransactions.map((order) => <article key={order.id}><div className="transaction-order"><b>{order.orderNumber}</b><span>{formatReceiptDate(order.createdAt)}</span></div><span className="transaction-payment">{label(order.paymentMethod)}</span><strong>{peso(order.total)}</strong><div className="transaction-actions"><button type="button" onClick={() => onViewDetails(order)}>View Details</button><button type="button" onClick={() => onOpenReceipt(order)}>Receipt</button></div></article>)}</div>
+      <footer className="transaction-pagination"><span>Showing {pageTransactions.length} out of {visibleTransactions.length}</span><nav aria-label="Transaction pages"><button type="button" onClick={() => setPage(1)} disabled={currentPage === 1} aria-label="First page">&laquo;</button><button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={currentPage === 1} aria-label="Previous page">&lsaquo;</button>{pageNumbers.map((pageNumber) => <button type="button" className={currentPage === pageNumber ? 'active' : ''} key={pageNumber} onClick={() => setPage(pageNumber)}>{pageNumber}</button>)}{totalPages > 4 ? <span className="transaction-page-gap">&hellip;</span> : null}{totalPages > 3 ? <button type="button" className={currentPage === totalPages ? 'active' : ''} onClick={() => setPage(totalPages)}>{totalPages}</button> : null}<button type="button" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={currentPage === totalPages} aria-label="Next page">&rsaquo;</button><button type="button" onClick={() => setPage(totalPages)} disabled={currentPage === totalPages} aria-label="Last page">&raquo;</button></nav></footer>
     </section>
   </div>
 }
 
+function TransactionDetailsModal({ order, onBack, onClose }) {
+  const items = order.items || []
+  const hasDiscount = Number(order.discountAmount || 0) > 0
+  const paymentDetails = [
+    ...(order.paymentReference ? [['Reference number', order.paymentReference]] : []),
+    ...(order.bankName ? [['Bank name', order.bankName]] : []),
+    ...(order.paymentMethod === 'Cash' || Number(order.cashReceived || 0) ? [['Amount paid', peso(order.cashReceived || order.total)], ['Change', peso(order.change || 0)]] : []),
+  ]
+  return <div className="transaction-details-backdrop" role="dialog" aria-modal="true" aria-labelledby="details-title">
+    <section className="transaction-details-modal">
+      <header><div><span>Transaction record</span><h2 id="details-title">Order Details</h2></div><div className="transaction-details-head-actions"><button type="button" onClick={onBack}>Back to transaction history</button><button type="button" onClick={onClose} aria-label="Close order details">&times;</button></div></header>
+      <div className="transaction-details-body">
+        <div className="detail-meta"><div><span>Order ID</span><b>{order.orderNumber}</b></div><div><span>Date</span><b>{formatReceiptDate(order.createdAt)}</b></div><div><span>Payment</span><b>{order.paymentMethod}</b></div></div>
+        <section><h3>Items</h3><div className="detail-items">{items.length ? items.map((item, index) => <article key={item.lineKey || item.id || index}><div><b>{item.name || item.product_name || item.item_name || 'Menu item'}</b><span>{customizationDetails(item).join(' / ') || 'Standard preparation'}</span></div><span>&times;{item.qty || item.quantity || 0}</span><strong>{peso(item.line_total || itemLineTotal(item))}</strong></article>) : <p>No item details are available for this transaction.</p>}</div></section>
+        <section className="detail-summary"><h3>Payment details</h3>{paymentDetails.length ? <div>{paymentDetails.map(([label, value]) => <p key={label}><span>{label}</span><b>{value}</b></p>)}</div> : <p>Payment details are not available for this transaction.</p>}</section>
+        <section className="detail-summary"><h3>Order summary</h3><div><p><span>Subtotal</span><b>{peso(order.subtotal)}</b></p>{hasDiscount ? <><p><span>{order.discountType || 'Discount'}</span><b>-{peso(order.discountAmount)}</b></p>{order.discountCustomerName ? <p><span>Discount name</span><b>{order.discountCustomerName}</b></p> : null}{order.discountIdNumber ? <p><span>Discount ID</span><b>{order.discountIdNumber}</b></p> : null}</> : <p><span>Discount</span><b>No discount</b></p>}</div></section>
+        <div className="detail-total"><span>Total</span><strong>{peso(order.total)}</strong></div>
+      </div>
+    </section>
+  </div>
+}
 function formatReceiptDate(value) {
   if (!value) return 'N/A'
   return new Date(value).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
@@ -714,7 +865,6 @@ function CashierReceipt({ order, onClose }) {
     <section className="cashier-receipt-modal" role="dialog" aria-modal="true" aria-label="Receipt preview">
       <header className="cashier-receipt-modal-head">
         <h3>Receipt Preview</h3>
-        <button type="button" onClick={onClose} aria-label="Close receipt">&times;</button>
       </header>
       <div className="receipt-preview-shell">
         <div className="receipt-print-area">
