@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import Brand from '../components/Brand'
 import BestSellerCarousel from '../components/BestSellerCarousel'
 import Reveal from '../components/Reveal'
+import HowOrderingWorks from '../components/HowOrderingWorks'
 import { store } from '../data/mockData'
 import { bestSellerItems } from '../data/bestSellers'
 import { useProductCustomization } from '../hooks/useProductCustomization'
@@ -19,7 +20,10 @@ const mapEmbed = 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3859.012
 const fadeUp = { hidden: { opacity: 0, y: 24 }, show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } } }
 
 export default function HomePage() {
-  const { addToCart, modal } = useProductCustomization()
+  const { addToCart, modal } = useProductCustomization({
+    alwaysCustomize: true,
+    modalVariant: 'menu-detail',
+  })
 
   return (
     <div className="storefront customer-landing">
@@ -84,6 +88,8 @@ export default function HomePage() {
             <p>We also offer pasta, rice meals, toasts, and snacks. Some bestsellers include homemade tiramisu, biscoff burnt cheesecake, and fresh cookie boxes for gifting or sharing.</p>
           </Reveal>
         </section>
+
+        <HowOrderingWorks />
 
         <section className="section landing-reviews" id="reviews">
           <Reveal tag="div" className="section-heading"><div><span className="eyebrow">Customer reviews</span><h2>What our customers say.</h2></div></Reveal>

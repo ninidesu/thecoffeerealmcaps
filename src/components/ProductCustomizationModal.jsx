@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { Minus, Plus } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Minus, Plus, ShoppingBag, X } from 'lucide-react'
 import Choice from './Choice'
 import { money } from '../utils/money'
 
-export default function ProductCustomizationModal({ product, onClose, onAdd }) {
+export default function ProductCustomizationModal({ product, onClose, onAdd, variant = '' }) {
+  const closeButtonRef = useRef(null)
   const [variationId, setVariationId] = useState('')
   const [temperature, setTemperature] = useState('')
   const [ice, setIce] = useState('Default Ice')
@@ -11,6 +12,20 @@ export default function ProductCustomizationModal({ product, onClose, onAdd }) {
   const [addons, setAddons] = useState([])
   const [quantity, setQuantity] = useState(1)
   const [instructions, setInstructions] = useState('')
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    closeButtonRef.current?.focus()
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [onClose])
 
   const variations = product.variations || []
   const temperatures = product.temperatures || []
@@ -54,20 +69,21 @@ export default function ProductCustomizationModal({ product, onClose, onAdd }) {
         if (event.target === event.currentTarget) onClose()
       }}
     >
-      <section className="payment-modal customize-modal" role="dialog" aria-modal="true" aria-labelledby="customize-modal-title">
-        <button className="payment-modal-close" type="button" onClick={onClose} aria-label="Close customization">
-          ×
+      <section className={`payment-modal customize-modal${variant ? ` customize-modal-${variant}` : ''}`} role="dialog" aria-modal="true" aria-labelledby="customize-modal-title">
+        <button ref={closeButtonRef} className="payment-modal-close" type="button" onClick={onClose} aria-label="Close customization">
+          <X size={20} />
         </button>
-        <div className="customize-modal-head">
+        <div className="customize-modal-head customize-modal-visual">
           <img src={product.image} alt={product.name} />
           <div>
-            <span className="payment-modal-kicker">Customize your order</span>
+            <span className="payment-modal-kicker">{product.category}</span>
             <h2 id="customize-modal-title">{product.name}</h2>
             {product.description && <p>{product.description}</p>}
           </div>
         </div>
 
         <div className="customize-modal-body">
+
           {variations.length > 0 && (
             <Choice title={product.category === 'Cakes' ? 'Portion' : 'Option'} options={variations} value={variation?.id} onChange={setVariationId} />
           )}
@@ -107,17 +123,21 @@ export default function ProductCustomizationModal({ product, onClose, onAdd }) {
         </div>
 
         <div className="add-bar">
-          <div className="quantity">
-            <button type="button" onClick={() => setQuantity((q) => Math.max(1, q - 1))} aria-label="Decrease quantity">
-              <Minus />
-            </button>
-            <b>{quantity}</b>
-            <button type="button" onClick={() => setQuantity((q) => q + 1)} aria-label="Increase quantity">
-              <Plus />
-            </button>
+          <div className="quantity-control">
+            <span>Quantity</span>
+            <div className="quantity">
+              <button type="button" onClick={() => setQuantity((q) => Math.max(1, q - 1))} disabled={quantity === 1} aria-label="Decrease quantity">
+                <Minus />
+              </button>
+              <b aria-live="polite">{quantity}</b>
+              <button type="button" onClick={() => setQuantity((q) => q + 1)} aria-label="Increase quantity">
+                <Plus />
+              </button>
+            </div>
           </div>
+          <div className="add-bar-total"><span>Total</span><strong>{money(total)}</strong></div>
           <button className="primary-button" type="button" onClick={confirm}>
-            Add to cart · {money(total)}
+            <ShoppingBag size={18} /> Add {quantity} to cart
           </button>
         </div>
       </section>

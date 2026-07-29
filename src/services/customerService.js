@@ -23,7 +23,11 @@ export async function uploadPaymentProof({orderId,userId,file}){
   const {error:uploadError}=await supabase.storage.from('payment-proofs').upload(path,file,{contentType:file.type,upsert:false})
   if(uploadError)throw uploadError
   const {error:attachError}=await supabase.rpc('attach_customer_payment_proof',{p_order_id:orderId,p_path:path})
-  if(attachError)throw attachError
+  if(attachError){
+    const {error:cleanupError}=await supabase.storage.from('payment-proofs').remove([path])
+    if(cleanupError)throw new Error(attachError.message+' The uploaded file could not be cleaned up: '+cleanupError.message)
+    throw attachError
+  }
   return {path,filename}
 }
 export async function fetchCustomerOrders(userId){

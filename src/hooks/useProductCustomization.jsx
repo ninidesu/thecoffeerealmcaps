@@ -12,12 +12,12 @@ export function needsCustomization(product) {
   )
 }
 
-export function useProductCustomization() {
+export function useProductCustomization({ alwaysCustomize = false, modalVariant = '' } = {}) {
   const { addItem } = useCart()
   const [product, setProduct] = useState(null)
 
   const addToCart = (item) => {
-    if (needsCustomization(item)) {
+    if (alwaysCustomize || needsCustomization(item)) {
       setProduct(item)
       return
     }
@@ -40,6 +40,7 @@ export function useProductCustomization() {
   const modal = product ? (
     <ProductCustomizationModal
       product={product}
+      variant={modalVariant}
       onClose={() => setProduct(null)}
       onAdd={(payload) => {
         addItem(payload)

@@ -361,6 +361,29 @@ const sendWithResend = async (payload: {
   return response.json();
 };
 
+const authorizeStaff = async (req: Request) => {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  const authorization = req.headers.get("Authorization") || "";
+  if (!supabaseUrl || !anonKey || !serviceKey || !authorization.startsWith("Bearer ")) {
+    throw new Error("Authentication required.");
+  }
+  const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: anonKey, Authorization: authorization },
+  });
+  if (!userResponse.ok) throw new Error("Invalid or expired session.");
+  const user = await userResponse.json();
+  const profileResponse = await fetch(
+    `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=role&limit=1`,
+    { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
+  );
+  if (!profileResponse.ok) throw new Error("Could not verify staff access.");
+  const profiles = await profileResponse.json();
+  if (!profiles.length || !["admin", "cashier"].includes(profiles[0].role)) {
+    throw new Error("Admin or cashier access required.");
+  }
+};
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -374,6 +397,7 @@ serve(async (req) => {
   }
 
   try {
+    await authorizeStaff(req);
     const payload = (await req.json()) as OrderEmailPayload;
     const type = payload.type || "receipt";
     const order = payload.order || {};

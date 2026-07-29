@@ -3,6 +3,8 @@ import { Plus } from 'lucide-react'
 
 export default function CoffeeCard({ item, offset, isActive, onSelect, onAddToCart }) {
   const distance = Math.abs(offset)
+  const cardScale = isActive ? 1.06 : distance === 1 ? 0.9 : 0.82
+  const cardOpacity = isActive ? 1 : distance === 1 ? 0.62 : distance === 2 ? 0.28 : 0
 
   return (
     <motion.article
@@ -20,14 +22,14 @@ export default function CoffeeCard({ item, offset, isActive, onSelect, onAddToCa
       }}
       animate={{
         x: `${offset * 78}%`,
-        scale: isActive ? 1 : Math.max(0.78, 0.94 - distance * 0.08),
-        opacity: distance > 2 ? 0 : isActive ? 1 : Math.max(0.35, 0.72 - distance * 0.15),
+        scale: cardScale,
+        opacity: cardOpacity,
         zIndex: 10 - distance,
         y: isActive ? -10 : 0,
       }}
       transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-      whileHover={{ y: (isActive ? -10 : 0) - 6, scale: (isActive ? 1 : Math.max(0.78, 0.94 - distance * 0.08)) * 1.02 }}
-      whileTap={{ scale: (isActive ? 1 : Math.max(0.78, 0.94 - distance * 0.08)) * 0.98 }}
+      whileHover={{ y: (isActive ? -10 : 0) - 6, scale: cardScale * 1.02 }}
+      whileTap={{ scale: cardScale * 0.98 }}
     >
       <div className="coffee-card-image">
         <img src={item.image} alt={item.name} draggable={false} />
