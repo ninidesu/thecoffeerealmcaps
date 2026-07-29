@@ -26,10 +26,6 @@ export async function uploadPaymentProof({orderId,userId,file}){
   if(attachError)throw attachError
   return {path,filename}
 }
-export async function setCustomerOrderStatus(orderId,status){
-  const {error}=await supabase.rpc('set_customer_order_status',{p_order_id:orderId,p_status:status})
-  if(error)throw error
-}
 export async function fetchCustomerOrders(userId){
   const {data,error}=await supabase.from('orders').select('id,order_number,order_type,status,subtotal,delivery_fee,final_total,payment_status,schedule_date,schedule_time,created_at,order_items(id,quantity),payments(method,status)').eq('customer_id',userId).order('created_at',{ascending:false})
   if(error)throw error

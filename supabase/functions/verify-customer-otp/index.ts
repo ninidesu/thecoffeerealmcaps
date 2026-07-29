@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-const otpPepper = Deno.env.get("OTP_PEPPER") || "coffee-realm-dev-pepper";
+const otpPepper = Deno.env.get("OTP_PEPPER") || "";
 
 const admin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -28,7 +28,7 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response(JSON.stringify({ success: false, error: "Use POST." }), { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
-    if (!supabaseUrl || !serviceRoleKey) throw new Error("Supabase service credentials are not configured.");
+    if (!supabaseUrl || !serviceRoleKey || !otpPepper) throw new Error("Supabase service credentials and OTP_PEPPER must be configured.");
     const body = await req.json();
     const email = normalizeEmail(String(body.email || ""));
     const username = String(body.username || "").trim();

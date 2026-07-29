@@ -1,3 +1,156 @@
+-- Security hardening deployment: delivery pricing, OTP controls, and customer order validation.
+
+-- 1. Server-authoritative delivery areas.
+-- Canonical server-side delivery pricing.
+-- The order RPC reads this table and never trusts a fee supplied by the client.
+
+create table if not exists public.delivery_areas (
+  barangay text primary key,
+  zone text not null,
+  fee numeric(12,2) not null check (fee >= 0),
+  estimated_time text not null,
+  is_active boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.delivery_areas (barangay, zone, fee, estimated_time)
+select barangay, 'Zone 1', 60, '10-20 mins'
+from unnest(array[
+  'Bagbag','Bahay Toro','Batasan Hills','Commonwealth','Holy Spirit','Payatas',
+  'Bagong Silangan','Capri','Fairview','Greater Lagro','Gulod','Kaligayahan',
+  'Nagkaisang Nayon','North Fairview','Novaliches Proper','Pasong Putik Proper',
+  'San Agustin','San Bartolome','Sauyo','Santa Lucia','Santa Monica','Talipapa',
+  'Tandang Sora','Culiat','Matandang Balara','Pasong Tamo'
+]) as barangay
+on conflict (barangay) do update set
+  zone=excluded.zone, fee=excluded.fee, estimated_time=excluded.estimated_time,
+  is_active=true, updated_at=now();
+
+insert into public.delivery_areas (barangay, zone, fee, estimated_time)
+select barangay, 'Zone 2', 80, '20-40 mins'
+from unnest(array[
+  'Alicia','Amihan','Apolonio Samson','Aurora','Bagong Pag-asa','Baesa',
+  'Balingasa','Balintawak','Bambang','Bungad','Damar','Damayan','Damayang Lagi',
+  'Del Monte','Dioquino Zobel','Don Manuel','Dona Aurora','Dona Faustina',
+  'Dona Imelda','Dona Josefa','Duyan-Duyan','Immaculate Concepcion','Kaunlaran',
+  'Lourdes','Maharlika','Manresa','Mariblo','Masambong','Milagrosa',
+  'N.S. Amoranto','Nayon Kanluran','Paang Bundok','Pag-ibig sa Nayon','Paltok',
+  'Paraiso','Phil-Am','Project 6','Ramon Magsaysay','Salvacion','San Antonio',
+  'San Isidro Labrador','San Jose','San Martin de Porres','San Roque',
+  'Santo Cristo','Santo Domingo','Talayan','Unang Sigaw','Veterans Village'
+]) as barangay
+on conflict (barangay) do update set
+  zone=excluded.zone, fee=excluded.fee, estimated_time=excluded.estimated_time,
+  is_active=true, updated_at=now();
+
+insert into public.delivery_areas (barangay, zone, fee, estimated_time)
+select barangay, 'Zone 3', 100, '40-60 mins'
+from unnest(array[
+  'Bagong Lipunan ng Crame','Bagumbayan','Bayanihan','Blue Ridge A','Blue Ridge B',
+  'Botocan','Camp Aguinaldo','Central','East Kamias','Escopa I','Escopa II',
+  'Escopa III','Escopa IV','Horseshoe','Kamuning','Kristong Hari','Krus na Ligas',
+  'Laging Handa','Libis','Loyola Heights','Malaya','Mangga','Mariana',
+  'Old Capitol Site','Paligsahan','Pinagkaisahan','Pinyahan','Quirino 2-A',
+  'Quirino 2-B','Quirino 2-C','Quirino 3-A','Quirino 3-B','Roxas',
+  'Sacred Heart','Saint Ignatius','Saint Peter','Santa Cruz','Santa Teresita',
+  'Santo Nino','Santol','Sienna','Silangan','Socorro','South Triangle',
+  'Tagumpay','Teachers Village East','Teachers Village West','Ugong Norte',
+  'UP Campus','UP Village','Valencia','West Kamias','West Triangle','White Plains',
+  'Kalusugan','New Era'
+]) as barangay
+on conflict (barangay) do update set
+  zone=excluded.zone, fee=excluded.fee, estimated_time=excluded.estimated_time,
+  is_active=true, updated_at=now();
+
+alter table public.delivery_areas enable row level security;
+drop policy if exists "Public reads active delivery areas" on public.delivery_areas;
+create policy "Public reads active delivery areas" on public.delivery_areas
+for select to anon, authenticated using (is_active = true);
+grant select on public.delivery_areas to anon, authenticated;
+
+
+-- 2. OTP storage and atomic rate limiting.
+-- thecoffeerealm custom 6-digit customer signup OTP storage
+-- Run this in Supabase SQL Editor before deploying the customer OTP Edge Functions.
+
+create extension if not exists pgcrypto;
+
+create table if not exists public.customer_email_otps (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  username text,
+  purpose text not null default 'register' check (purpose in ('register')),
+  code_hash text not null,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  attempt_count integer not null default 0,
+  blocked_until timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists customer_email_otps_email_purpose_created_idx
+  on public.customer_email_otps (lower(email), purpose, created_at desc);
+
+alter table public.customer_email_otps enable row level security;
+
+-- No public RLS policies are intentionally created.
+-- These rows should only be read/written by Supabase Edge Functions using the service-role key.
+
+create table if not exists public.customer_otp_rate_limits (
+  scope text not null check (scope in ('email','ip','global')),
+  key_hash text not null,
+  window_started_at timestamptz not null default now(),
+  request_count integer not null default 0 check (request_count >= 0),
+  primary key (scope, key_hash)
+);
+
+alter table public.customer_otp_rate_limits enable row level security;
+
+create or replace function public.consume_customer_otp_rate_limit(
+  p_scope text,
+  p_key_hash text,
+  p_window_seconds integer,
+  p_max_requests integer
+) returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  allowed boolean;
+begin
+  if p_scope not in ('email','ip','global') or p_key_hash is null or p_key_hash = '' then
+    raise exception 'Invalid OTP rate-limit key';
+  end if;
+  if p_window_seconds < 1 or p_max_requests < 1 then
+    raise exception 'Invalid OTP rate-limit configuration';
+  end if;
+
+  insert into public.customer_otp_rate_limits as rate
+    (scope, key_hash, window_started_at, request_count)
+  values (p_scope, p_key_hash, now(), 1)
+  on conflict (scope, key_hash) do update set
+    window_started_at = case
+      when rate.window_started_at <= now() - make_interval(secs => p_window_seconds) then now()
+      else rate.window_started_at
+    end,
+    request_count = case
+      when rate.window_started_at <= now() - make_interval(secs => p_window_seconds) then 1
+      else rate.request_count + 1
+    end
+  returning request_count <= p_max_requests into allowed;
+
+  return allowed;
+end;
+$$;
+
+revoke all on function public.consume_customer_otp_rate_limit(text,text,integer,integer) from public;
+grant execute on function public.consume_customer_otp_rate_limit(text,text,integer,integer) to service_role;
+
+-- No public RLS policies are intentionally created for rate-limit counters.
+
+
+-- 3. Customer order, payment, add-on, and proof validation.
 -- Run this complete file in Supabase Dashboard > SQL Editor.
 -- Prerequisite: the canonical menu_items catalog, cashier order tables, and
 -- supabase/delivery_areas.sql.

@@ -53,8 +53,9 @@ project that already has those base tables, apply the repository SQL in this ord
 
 1. `supabase/seed_existing_catalog_tables.sql`
 2. `supabase/customer_menu_configuration.sql`
-3. `supabase/customer_otp_schema.sql`
-4. `supabase/customer_payment_proofs.sql`
+3. `supabase/delivery_areas.sql`
+4. `supabase/customer_otp_schema.sql`
+5. `supabase/customer_payment_proofs.sql`
 
 `supabase/cashier_schema.sql` and `supabase/seed_from_coffee_pos.sql` target the
 older `categories`/`products` catalog and are retained only for legacy

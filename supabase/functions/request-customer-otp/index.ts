@@ -10,7 +10,7 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const resendApiKey = Deno.env.get("RESEND_API_KEY") || "";
-const otpPepper = Deno.env.get("OTP_PEPPER") || "coffee-realm-dev-pepper";
+const otpPepper = Deno.env.get("OTP_PEPPER") || "";
 const fromEmail = Deno.env.get("MAIL_FROM_EMAIL") || "";
 const fromName = Deno.env.get("MAIL_FROM_NAME") || "thecoffeerealm";
 const bannerImage = Deno.env.get("MAIL_BANNER_IMAGE") || "https://res.cloudinary.com/dkpdilkin/image/upload/f_auto,q_auto,w_1200/emailbg_miswbo.jpg";
@@ -26,6 +26,18 @@ async function sha256(value: string) {
   const data = new TextEncoder().encode(value);
   const hash = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function consumeRateLimit(scope: "email" | "ip" | "global", key: string, windowSeconds: number, maxRequests: number, message: string) {
+  const keyHash = await sha256(`${scope}:${key}:${otpPepper}`);
+  const { data, error } = await admin.rpc("consume_customer_otp_rate_limit", {
+    p_scope: scope,
+    p_key_hash: keyHash,
+    p_window_seconds: windowSeconds,
+    p_max_requests: maxRequests,
+  });
+  if (error) throw error;
+  if (data !== true) throw new Error(message);
 }
 
 function generateOtp() {
@@ -82,22 +94,22 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response(JSON.stringify({ success: false, error: "Use POST." }), { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
-    if (!supabaseUrl || !serviceRoleKey) throw new Error("Supabase service credentials are not configured.");
+    if (!supabaseUrl || !serviceRoleKey || !otpPepper) throw new Error("Supabase service credentials and OTP_PEPPER must be configured.");
     const body = await req.json();
     const email = normalizeEmail(String(body.email || ""));
     const username = String(body.username || "").trim();
     if (!email || !email.includes("@")) throw new Error("A valid email address is required.");
     if (username.length < 3) throw new Error("Username must be at least 3 characters long.");
 
-    const since = new Date(Date.now() - 60_000).toISOString();
-    const { data: recent } = await admin
-      .from("customer_email_otps")
-      .select("id")
-      .eq("email", email)
-      .eq("purpose", "register")
-      .gte("created_at", since)
-      .maybeSingle();
-    if (recent) throw new Error("Please wait at least 60 seconds before requesting another code.");
+    const clientIp = String(
+      req.headers.get("cf-connecting-ip") ||
+      req.headers.get("x-real-ip") ||
+      req.headers.get("x-forwarded-for")?.split(",")[0] ||
+      "",
+    ).trim();
+    await consumeRateLimit("email", email, 60, 1, "Please wait at least 60 seconds before requesting another code.");
+    if (clientIp) await consumeRateLimit("ip", clientIp, 600, 5, "Too many OTP requests. Please try again later.");
+    await consumeRateLimit("global", "customer-registration", 300, 200, "Registration is temporarily busy. Please try again later.");
 
     const otp = generateOtp();
     const codeHash = await sha256(`${email}:${otp}:${otpPepper}`);
