@@ -1,5 +1,10 @@
 -- Run this complete file in Supabase Dashboard > SQL Editor.
+-- Prerequisite: the canonical menu_items catalog and the cashier order tables.
 create extension if not exists pgcrypto;
+
+alter table public.orders
+  add column if not exists order_sequence bigint,
+  add column if not exists order_source text;
 
 create sequence if not exists public.orders_order_sequence_seq;
 select setval(
@@ -148,6 +153,7 @@ alter table public.payments enable row level security;
 drop policy if exists "cashier read orders" on public.orders;
 drop policy if exists "cashier insert walkin orders" on public.orders;
 drop policy if exists "Customers read only their orders" on public.orders;
+drop policy if exists "Internal staff insert orders" on public.orders;
 create policy "Customers read only their orders" on public.orders for select to authenticated
 using (customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
 create policy "Internal staff insert orders" on public.orders for insert to authenticated
@@ -156,6 +162,7 @@ with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.r
 drop policy if exists "cashier read order items" on public.order_items;
 drop policy if exists "cashier insert order items" on public.order_items;
 drop policy if exists "Customers read only their order items" on public.order_items;
+drop policy if exists "Internal staff insert order items" on public.order_items;
 create policy "Customers read only their order items" on public.order_items for select to authenticated
 using (exists(select 1 from public.orders o where o.id=order_id and (o.customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')))));
 create policy "Internal staff insert order items" on public.order_items for insert to authenticated
@@ -164,6 +171,7 @@ with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.r
 drop policy if exists "cashier read payments" on public.payments;
 drop policy if exists "cashier insert payments" on public.payments;
 drop policy if exists "Customers read only their payments" on public.payments;
+drop policy if exists "Internal staff insert payments" on public.payments;
 create policy "Customers read only their payments" on public.payments for select to authenticated
 using (exists(select 1 from public.orders o where o.id=order_id and (o.customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')))));
 create policy "Internal staff insert payments" on public.payments for insert to authenticated

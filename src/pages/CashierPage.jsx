@@ -60,11 +60,11 @@ const makeLineKey = (item, customizations = {}, addons = []) => [
 ].join('-').toLowerCase().replace(/\s+/g, '-')
 
 const menuSelectBase = 'id,main_category_id,subcategory_id,item_type,name,slug,description,price,image_url,is_available,is_archived,allow_addons,allow_sugar,allow_ice,temperature_type,sort_order,subcategories(display_name,name),main_categories(display_name,name)'
-const menuSelectWithVariants = menuSelectBase.replace('temperature_type,', 'temperature_type,variant_config,')
+const menuSelectWithVariants = menuSelectBase.replace('temperature_type,', 'temperature_type,variant_options,')
 
 async function loadMenuItems() {
   const withVariants = await supabase.from('menu_items').select(menuSelectWithVariants).eq('is_archived', false).order('sort_order', { ascending: true })
-  if (!withVariants.error || !/variant_config/i.test(withVariants.error.message || '')) return withVariants
+  if (!withVariants.error || !/variant_options/i.test(withVariants.error.message || '')) return withVariants
   return supabase.from('menu_items').select(menuSelectBase).eq('is_archived', false).order('sort_order', { ascending: true })
 }
 const fallbackImage = '/images/coffeerealmlogo.png'
@@ -151,7 +151,7 @@ function normalizeProduct(row) {
     allowIce: row.allow_ice ?? row.allowIce,
     allowAddons: row.allow_addons ?? row.allowAddons,
     temperatureType: row.temperature_type || row.temperatureType || '',
-    variantConfig: parseVariantConfig(row.variant_config || row.variantConfig),
+    variantConfig: parseVariantConfig(row.variant_options || row.variantOptions),
   }
   return { ...product, ...productOptionDefaults(product) }
 }

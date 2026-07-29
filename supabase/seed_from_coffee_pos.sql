@@ -1,4 +1,8 @@
--- Seed thecoffeerealm catalog from C:\Users\Danica\Downloads\coffee_pos.sql
+-- LEGACY COMPATIBILITY SEED
+-- This targets public.categories/public.products. New deployments must use
+-- seed_existing_catalog_tables.sql and customer_menu_configuration.sql instead.
+--
+-- Seed thecoffeerealm catalog from the legacy coffee_pos.sql export.
 -- Run after supabase/cashier_schema.sql in Supabase SQL Editor.
 
 insert into public.categories (name, slug, sort_order, is_active) values

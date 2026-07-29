@@ -41,8 +41,27 @@ src/
   App.jsx       routing
   styles.css    shared visual system and responsive behavior
 supabase/
-  *.sql         setup/seed SQL files
+  *.sql         canonical setup plus explicitly marked legacy compatibility SQL
   functions/    Supabase Edge Functions
 ```
+
+## Supabase SQL model
+
+The canonical application catalog is `main_categories` -> `subcategories` ->
+`menu_items`. Both the customer menu and cashier read this model. For an existing
+project that already has those base tables, apply the repository SQL in this order:
+
+1. `supabase/seed_existing_catalog_tables.sql`
+2. `supabase/customer_menu_configuration.sql`
+3. `supabase/customer_otp_schema.sql`
+4. `supabase/customer_payment_proofs.sql`
+
+`supabase/cashier_schema.sql` and `supabase/seed_from_coffee_pos.sql` target the
+older `categories`/`products` catalog and are retained only for legacy
+compatibility. Do not apply or maintain both catalog models in one deployment.
+
+Supabase CLI connection state under `supabase/.temp/` is local-only and ignored by
+Git.
+
 
 See [MIGRATION_BLUEPRINT.md](./MIGRATION_BLUEPRINT.md) for the page inventory, UI/data requirements, and recommended Supabase schema.

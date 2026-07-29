@@ -1,3 +1,6 @@
+-- CANONICAL APPLICATION CATALOG SEED
+-- The React customer and cashier experiences both read public.menu_items.
+--
 -- Seed existing UUID-based Supabase catalog tables from coffee_pos.sql
 -- No ON CONFLICT required. This works even when the tables have no unique constraints.
 -- It skips rows that already exist by natural keys: category name, subcategory name, menu slug, addon name.

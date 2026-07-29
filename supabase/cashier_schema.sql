@@ -1,3 +1,9 @@
+-- LEGACY COMPATIBILITY SCHEMA
+-- The application catalog is public.menu_items with main_categories and
+-- subcategories. The public.categories/public.products tables below are retained
+-- only for older cashier deployments; do not seed both catalog models.
+--
+
 -- thecoffeerealm cashier-only Supabase setup
 -- Run this in Supabase Dashboard > SQL Editor.
 -- It creates the tables expected by the React cashier POS.
