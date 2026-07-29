@@ -347,7 +347,7 @@ export default function CashierPage() {
     setCart((current) => {
       const lineKey = makeLineKey(product, customizations, addons)
       const existing = current.find((item) => item.lineKey === lineKey)
-      if (existing) return current.map((item) => item.lineKey === lineKey ? { ...item, qty: item.qty + quantity } : item)
+      if (existing) return current.map((item) => item.lineKey === lineKey ? { ...item, qty: Math.min(99, item.qty + quantity) } : item)
       return [...current, { ...product, lineKey, qty: quantity, isDiscounted: false, customizations, addons }]
     })
   }
@@ -464,7 +464,7 @@ export default function CashierPage() {
     })
     if (orderError) return setError(`Order was not saved: ${orderError.message}`)
 
-    const saved = { ...orderDraft, id: savedOrder.id, orderNumber: savedOrder.order_number || orderDraft.orderNumber }
+    const saved = { ...orderDraft, id: savedOrder.id, orderNumber: savedOrder.order_number || orderDraft.orderNumber, subtotal: Number(savedOrder.subtotal), discountAmount: Number(savedOrder.discount_amount), total: Number(savedOrder.total), change: Number(savedOrder.change_amount) }
     setTransactions((current) => [saved, ...current])
     setReceipt(saved)
     setCart([])
@@ -640,7 +640,7 @@ function ItemCustomizationModal({ product, onClose, onAdd }) {
   }
 
   function changeQuantity(delta) {
-    setQuantity((current) => Math.max(1, current + delta))
+    setQuantity((current) => Math.min(99, Math.max(1, current + delta)))
   }
 
   function submitItem() {
@@ -911,70 +911,3 @@ function CashierReceipt({ order, onClose }) {
     </section>
   </div>
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
