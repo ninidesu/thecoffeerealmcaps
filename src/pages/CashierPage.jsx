@@ -436,11 +436,7 @@ export default function CashierPage() {
       payment_confirmed: true,
     }
 
-    const { data: savedOrder, error: orderError } = await supabase.from('orders').insert(orderPayload).select().single()
-    if (orderError) return setError(`Order was not saved: ${orderError.message}`)
-
     const orderItems = cart.map((item) => ({
-      order_id: savedOrder.id,
       menu_item_id: item.id,
       item_name: item.name,
       unit_price: lineUnitPrice(item),
@@ -451,12 +447,8 @@ export default function CashierPage() {
       customizations: item.customizations || {},
       addons: item.addons || [],
     }))
-    const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
-    if (itemsError) return setError(`Order saved, but items were not saved: ${itemsError.message}`)
-
     const paymentMethodCode = { Cash: 'cash', GCash: 'gcash', 'Bank Transfer': 'bank_transfer' }[payment.method] || 'cash'
     const paymentPayload = {
-      order_id: savedOrder.id,
       method: paymentMethodCode,
       amount_due: total,
       amount_received: payment.method === 'Cash' ? Number(payment.cashReceived || total) : total,
@@ -467,8 +459,10 @@ export default function CashierPage() {
       status: 'paid',
       paid_at: new Date().toISOString(),
     }
-    const { error: paymentError } = await supabase.from('payments').insert(paymentPayload)
-    if (paymentError) return setError(`Order and items saved, but payment was not saved: ${paymentError.message}`)
+    const { data: savedOrder, error: orderError } = await supabase.rpc('create_cashier_order', {
+      request_payload: { order: orderPayload, items: orderItems, payment: paymentPayload },
+    })
+    if (orderError) return setError(`Order was not saved: ${orderError.message}`)
 
     const saved = { ...orderDraft, id: savedOrder.id, orderNumber: savedOrder.order_number || orderDraft.orderNumber }
     setTransactions((current) => [saved, ...current])
