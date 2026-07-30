@@ -8,7 +8,11 @@ export async function saveProfile(userId,values){
   const {data}=await supabase.from('profiles').update({...values,updated_at:new Date().toISOString()}).eq('id',userId).select().maybeSingle()
   return data||{id:userId,email:values.email||authData.user?.email,...metadata}
 }
-export async function fetchAddresses(userId){const {data,error}=await supabase.from('customer_addresses').select('*').eq('customer_id',userId).order('is_default',{ascending:false});if(error)throw error;return data}
+export async function fetchAddresses(userId){const {data,error}=await supabase.from('customer_addresses').select('*').eq('customer_id',userId).order('is_default',{ascending:false}).order('created_at',{ascending:false});if(error)throw error;return data}
+export async function createAddress(userId,values){const {data,error}=await supabase.from('customer_addresses').insert({customer_id:userId,label:values.label||null,recipient_name:values.recipientName||null,phone:values.phone||null,address_line:values.addressLine,barangay:values.barangay||null,city:values.city||'Quezon City',province:values.province||'Metro Manila',postal_code:values.postalCode||null,delivery_notes:values.deliveryNotes||null,is_default:Boolean(values.isDefault)}).select().single();if(error)throw error;return data}
+export async function updateAddress(addressId,values){const {data,error}=await supabase.from('customer_addresses').update({label:values.label||null,recipient_name:values.recipientName||null,phone:values.phone||null,address_line:values.addressLine,barangay:values.barangay||null,city:values.city||'Quezon City',province:values.province||'Metro Manila',postal_code:values.postalCode||null,delivery_notes:values.deliveryNotes||null,is_default:Boolean(values.isDefault),updated_at:new Date().toISOString()}).eq('id',addressId).select().single();if(error)throw error;return data}
+export async function deleteAddress(addressId){const {error}=await supabase.from('customer_addresses').delete().eq('id',addressId);if(error)throw error}
+export async function setDefaultAddress(addressId){const {data,error}=await supabase.from('customer_addresses').update({is_default:true,updated_at:new Date().toISOString()}).eq('id',addressId).select().single();if(error)throw error;return data}
 export async function createCustomerOrder(payload){if(!isSupabaseConfigured)throw new Error('Supabase is not configured.');const {data,error}=await supabase.rpc('create_customer_order',{request_payload:payload});if(error)throw error;return data}
 
 export async function uploadPaymentProof({orderId,userId,file}){
@@ -30,8 +34,41 @@ export async function uploadPaymentProof({orderId,userId,file}){
   }
   return {path,filename}
 }
+const ORDER_DETAIL_SELECT='id,order_number,order_type,status,subtotal,delivery_fee,final_total,payment_status,payment_confirmed,payment_proof_path,refund_status,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,schedule_date,schedule_time,created_at,updated_at,delivery_address,delivery_notes,customer_name,customer_phone,customer_email,order_items(id,menu_item_id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),payments(method,status,reference_number)'
+
 export async function fetchCustomerOrders(userId){
-  const {data,error}=await supabase.from('orders').select('id,order_number,order_type,status,subtotal,delivery_fee,final_total,payment_status,schedule_date,schedule_time,created_at,order_items(id,quantity),payments(method,status)').eq('customer_id',userId).order('created_at',{ascending:false})
+  const {data,error}=await supabase.from('orders').select(ORDER_DETAIL_SELECT).eq('customer_id',userId).order('created_at',{ascending:false})
   if(error)throw error
   return data||[]
+}
+export async function fetchCustomerOrder(orderId){
+  const {data,error}=await supabase.from('orders').select(ORDER_DETAIL_SELECT).eq('id',orderId).maybeSingle()
+  if(error)throw error
+  return data||null
+}
+export async function cancelCustomerOrder(orderId,reason,notes){
+  const {data,error}=await supabase.rpc('customer_cancel_order',{p_order_id:orderId,p_reason:reason,p_notes:notes||null})
+  if(error)throw error
+  return data
+}
+export async function getCustomerPaymentProofUrl(path){
+  if(!path)return null
+  const {data,error}=await supabase.storage.from('payment-proofs').createSignedUrl(path,300)
+  if(error)throw error
+  return data?.signedUrl||null
+}
+export async function fetchOrderFeedback(orderId,userId){
+  const {data,error}=await supabase.from('order_feedback').select('id,rating,comment').eq('order_id',orderId).eq('customer_id',userId).maybeSingle()
+  if(error)throw error
+  return data||null
+}
+export async function fetchAddonNameMap(){
+  const {data,error}=await supabase.from('addons').select('id,name')
+  if(error)throw error
+  return Object.fromEntries((data||[]).map(a=>[a.id,a.name]))
+}
+export async function submitOrderFeedback({orderId,userId,rating,comment}){
+  const {data,error}=await supabase.from('order_feedback').insert({order_id:orderId,customer_id:userId,rating,comment:comment||null}).select().single()
+  if(error)throw error
+  return data
 }

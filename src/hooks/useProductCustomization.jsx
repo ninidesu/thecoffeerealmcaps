@@ -16,9 +16,13 @@ export function useProductCustomization({ alwaysCustomize = false, modalVariant 
   const { addItem } = useCart()
   const [product, setProduct] = useState(null)
 
+  const openProduct = (item) => {
+    setProduct(item)
+  }
+
   const addToCart = (item) => {
     if (alwaysCustomize || needsCustomization(item)) {
-      setProduct(item)
+      openProduct(item)
       return
     }
     addItem({
@@ -49,5 +53,5 @@ export function useProductCustomization({ alwaysCustomize = false, modalVariant 
     />
   ) : null
 
-  return { addToCart, modal }
+  return { addToCart, openProduct, modal }
 }

@@ -96,6 +96,23 @@ HTML:
 
 ## Reset password
 
+**Important — this must use `{{ .Token }}`, not `{{ .ConfirmationURL }}`.**
+The customer-facing reset flow (`CustomerLoginPage.jsx` → `submitForgotPassword`
+→ `verifyForgotOtp`) calls `supabase.auth.verifyOtp({ email, token, type:
+'recovery' })`, which needs the 6-digit code, not a clickable link. If this
+template only prints `{{ .ConfirmationURL }}`, no code is ever emailed and
+every reset attempt fails with "Invalid OTP" no matter what the user enters.
+
+Use the Confirm signup template above as the visual reference.
+This Reset password template intentionally matches the same banner, sage-green
+palette, centered OTP card, and overall layout so auth emails feel consistent.
+
+Paste this under:
+
+```text
+Supabase Dashboard > Authentication > Emails > Templates > Reset password
+```
+
 Subject:
 
 ```text
@@ -113,19 +130,46 @@ HTML:
           <tr>
             <td style="background-color:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 8px 24px rgba(31,47,38,0.10);">
               <img src="https://res.cloudinary.com/dkpdilkin/image/upload/f_auto,q_auto,w_1200/emailbg_miswbo.jpg" alt="thecoffeerealm Email Banner" width="640" style="display:block;width:100%;max-width:640px;height:auto;border:0;margin:0;padding:0;">
-              <div style="padding:32px 32px 12px;text-align:center;">
-                <div style="font-size:13px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">thecoffeerealm</div>
-                <div style="font-size:30px;line-height:38px;font-weight:bold;color:#1b2d22;margin:0;">Reset Your Password</div>
-              </div>
-              <div style="padding:0 32px 20px;text-align:center;font-size:16px;line-height:26px;color:#4f6358;">
-                We received a request to reset your password. Click the button below to continue.
-              </div>
-              <div style="padding:8px 32px 20px;text-align:center;">
-                <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#2f5c46;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:999px;padding:14px 24px;">Reset Password</a>
-              </div>
-              <div style="padding:0 32px 30px;text-align:center;font-size:13px;line-height:21px;color:#708278;">
-                If you did not request this email, you can safely ignore it.
-              </div>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                <tr>
+                  <td style="padding:32px 32px 12px;text-align:center;">
+                    <div style="font-size:13px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#2f5c46;margin-bottom:10px;">thecoffeerealm</div>
+                    <div style="font-size:30px;line-height:38px;font-weight:bold;color:#1b2d22;margin:0;">Reset Your Password</div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:0 32px 8px;text-align:center;font-size:16px;line-height:26px;color:#4f6358;">
+                    We received a request to reset your password. Use the code below to continue.
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:18px 32px 10px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
+                      <tr>
+                        <td align="center" style="background-color:#f4faf3;border:2px dashed #2f5c46;border-radius:16px;padding:16px 28px;">
+                          <div style="font-size:12px;line-height:18px;color:#5d6f63;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Your Reset Code</div>
+                          <div style="font-size:36px;line-height:42px;font-weight:bold;letter-spacing:10px;color:#2f5c46;">{{ .Token }}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 32px 0;text-align:center;font-size:15px;line-height:24px;color:#244735;font-weight:bold;">
+                    This code will expire soon.
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 32px 0;text-align:center;font-size:14px;line-height:22px;color:#7a3e00;">
+                    Do not share this code with anyone.
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:24px 32px 30px;text-align:center;font-size:13px;line-height:21px;color:#708278;">
+                    If you did not request this email, you can safely ignore it.
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
         </table>

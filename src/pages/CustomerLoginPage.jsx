@@ -1,5 +1,5 @@
 import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck, User, UserPlus } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
@@ -8,6 +8,8 @@ const otpDigits = 6
 export default function CustomerLoginPage({ initialMode = 'login' }) {
   const navigate = useNavigate()
   const location = useLocation()
+  const verificationOtpRefs = useRef([])
+  const forgotOtpRefs = useRef([])
   const [mode, setMode] = useState(initialMode)
   const [showLoginPassword, setShowLoginPassword] = useState(false)
   const [showRegisterPassword, setShowRegisterPassword] = useState(false)
@@ -20,10 +22,32 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
   const [registeredEmail, setRegisteredEmail] = useState('')
   const [pendingUsername, setPendingUsername] = useState('')
   const [otpCode, setOtpCode] = useState(Array(otpDigits).fill(''))
-  const [authMessage, setAuthMessage] = useState('')
+  const [authMessage, setAuthMessage] = useState(location.state?.authMessage || '')
   const [authError, setAuthError] = useState('')
   const [loading, setLoading] = useState(false)
   const [forgotEmail, setForgotEmail] = useState('')
+
+  useEffect(() => {
+    if (!location.state?.openForgotPassword) return
+    setAuthError('')
+    setAuthMessage(location.state?.authMessage || '')
+    setForgotEmail(location.state?.forgotEmail || '')
+    setForgotStep('email')
+    setForgotOtp(Array(otpDigits).fill(''))
+    setNewPassword('')
+    setConfirmPassword('')
+    setForgotOpen(true)
+  }, [location.state])
+
+  useEffect(() => {
+    if (!otpOpen) return
+    focusOtpGroup(verificationOtpRefs, otpCode)
+  }, [otpCode, otpOpen])
+
+  useEffect(() => {
+    if (forgotStep !== 'otp') return
+    focusOtpGroup(forgotOtpRefs, forgotOtp)
+  }, [forgotOtp, forgotStep])
 
   async function submitLogin(event) {
     event.preventDefault()
@@ -101,11 +125,16 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     setAuthError('')
     setAuthMessage('')
     if (!isSupabaseConfigured) return setAuthError('Supabase is not configured yet.')
-    if (!forgotEmail.trim()) return setAuthError('Enter your email address first.')
+    const trimmedEmail = forgotEmail.trim()
+    if (!trimmedEmail) return setAuthError('Enter your email address first.')
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return setAuthError('Enter a valid email address.')
     setLoading(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim())
+    const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail)
     setLoading(false)
-    if (error) return setAuthError(error.message)
+    // Supabase intentionally does not reveal whether the email is registered
+    // (avoids account enumeration) — a success response here does not mean
+    // the address exists, only that the request was accepted.
+    if (error) return setAuthError(error.message || 'Could not send the reset code. Please try again.')
     setForgotOtp(Array(otpDigits).fill(''))
     setForgotStep('otp')
     setAuthMessage('A 6-digit password reset code was sent to your email.')
@@ -163,14 +192,12 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     setNewPassword('')
     setConfirmPassword('')
   }
-  function changeOtpDigit(index, value) {
-    const clean = value.replace(/\D/g, '').slice(-1)
-    setOtpCode((current) => current.map((digit, digitIndex) => digitIndex === index ? clean : digit))
+  function setVerificationOtpDigit(index, value) {
+    setOtpCode((current) => current.map((digit, digitIndex) => digitIndex === index ? value : digit))
   }
 
-  function changeForgotOtpDigit(index, value) {
-    const clean = value.replace(/\D/g, '').slice(-1)
-    setForgotOtp((current) => current.map((digit, digitIndex) => digitIndex === index ? clean : digit))
+  function setForgotOtpDigit(index, value) {
+    setForgotOtp((current) => current.map((digit, digitIndex) => digitIndex === index ? value : digit))
   }
 
   return (
@@ -244,7 +271,7 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
           <p>Enter the 6-digit password reset code sent to <b>{forgotEmail}</b>.</p>
           {authError ? <AuthNotice variant="error" message={authError} /> : null}
           {authMessage ? <AuthNotice variant="success" message={authMessage} /> : null}
-          <div className="legacy-otp-inputs" aria-label="Password reset OTP inputs">{forgotOtp.map((digit, index) => <input key={index} value={digit} onChange={(event) => changeForgotOtpDigit(index, event.target.value)} inputMode="numeric" maxLength="1" aria-label={`Reset OTP digit ${index + 1}`} />)}</div>
+          <div className="legacy-otp-inputs" aria-label="Password reset OTP inputs" onPaste={(event) => handleOtpPaste(event, forgotOtp, setForgotOtpDigit, forgotOtpRefs)}>{forgotOtp.map((digit, index) => <input key={index} ref={(element) => { forgotOtpRefs.current[index] = element }} value={digit} onChange={(event) => handleOtpInput(index, event.target.value, forgotOtp, setForgotOtpDigit, forgotOtpRefs)} onKeyDown={(event) => handleOtpKeyDown(index, event, forgotOtp, setForgotOtpDigit, forgotOtpRefs)} onFocus={(event) => event.target.select()} inputMode="numeric" maxLength={otpDigits} aria-label={`Reset OTP digit ${index + 1}`} />)}</div>
           <button type="button" className="legacy-auth-submit" onClick={verifyForgotOtp} disabled={loading}>{loading ? 'VERIFYING...' : 'VERIFY OTP'}</button>
           <button type="button" className="legacy-auth-link-button" onClick={resendForgotOtp} disabled={loading}>Resend code</button>
         </div> : null}
@@ -262,7 +289,7 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
         <p>We sent a 6-digit verification code to <b>{registeredEmail}</b>. Enter the code here to create your account.</p>
         {authError ? <AuthNotice variant="error" message={authError} /> : null}
         {authMessage ? <AuthNotice variant="success" message={authMessage} /> : null}
-        <div className="legacy-otp-inputs" aria-label="OTP code inputs">{otpCode.map((digit, index) => <input key={index} value={digit} onChange={(event) => changeOtpDigit(index, event.target.value)} inputMode="numeric" maxLength="1" aria-label={`OTP digit ${index + 1}`} />)}</div>
+        <div className="legacy-otp-inputs" aria-label="OTP code inputs" onPaste={(event) => handleOtpPaste(event, otpCode, setVerificationOtpDigit, verificationOtpRefs)}>{otpCode.map((digit, index) => <input key={index} ref={(element) => { verificationOtpRefs.current[index] = element }} value={digit} onChange={(event) => handleOtpInput(index, event.target.value, otpCode, setVerificationOtpDigit, verificationOtpRefs)} onKeyDown={(event) => handleOtpKeyDown(index, event, otpCode, setVerificationOtpDigit, verificationOtpRefs)} onFocus={(event) => event.target.select()} inputMode="numeric" maxLength={otpDigits} aria-label={`OTP digit ${index + 1}`} />)}</div>
         <button type="button" className="legacy-auth-submit" onClick={verifyOtp} disabled={loading}>{loading ? 'VERIFYING...' : 'VERIFY OTP'}</button>
         <button type="button" className="legacy-auth-link-button" onClick={resendOtp} disabled={loading}>Resend code</button>
       </AuthModal> : null}
@@ -281,6 +308,59 @@ function AuthModal({ title, children, onClose }) {
       {children}
     </section>
   </div>
+}
+
+function focusOtpInput(refs, index) {
+  refs.current[index]?.focus()
+  refs.current[index]?.select?.()
+}
+
+function focusOtpGroup(refs, digits) {
+  const targetIndex = Math.min(digits.findIndex((digit) => !digit), digits.length - 1)
+  const safeIndex = targetIndex === -1 ? digits.length - 1 : targetIndex
+  focusOtpInput(refs, safeIndex)
+}
+
+function handleOtpInput(index, value, otp, onOtpChange, refs) {
+  const digits = value.replace(/\D/g, '')
+  if (!digits) {
+    onOtpChange(index, '')
+    return
+  }
+  digits.slice(0, otp.length - index).split('').forEach((digit, offset) => onOtpChange(index + offset, digit))
+  const nextIndex = Math.min(index + digits.length, otp.length - 1)
+  focusOtpInput(refs, nextIndex)
+}
+
+function handleOtpKeyDown(index, event, otp, onOtpChange, refs) {
+  if (event.key === 'Backspace') {
+    if (otp[index]) {
+      event.preventDefault()
+      onOtpChange(index, '')
+      return
+    }
+    if (index > 0) {
+      event.preventDefault()
+      focusOtpInput(refs, index - 1)
+    }
+  }
+  if (event.key === 'ArrowLeft' && index > 0) {
+    event.preventDefault()
+    focusOtpInput(refs, index - 1)
+  }
+  if (event.key === 'ArrowRight' && index < otp.length - 1) {
+    event.preventDefault()
+    focusOtpInput(refs, index + 1)
+  }
+}
+
+function handleOtpPaste(event, otp, onOtpChange, refs) {
+  const digits = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, otp.length)
+  if (!digits) return
+  event.preventDefault()
+  digits.split('').forEach((digit, index) => onOtpChange(index, digit))
+  const focusIndex = Math.min(digits.length, otp.length) - 1
+  focusOtpInput(refs, Math.max(focusIndex, 0))
 }
 
 

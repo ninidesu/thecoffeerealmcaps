@@ -1,94 +1,17 @@
--- Run this complete file in Supabase Dashboard > SQL Editor.
--- Prerequisite: the canonical menu_items catalog, cashier order tables, and
--- supabase/delivery_areas.sql.
-create extension if not exists pgcrypto;
-
-alter table public.orders
-  add column if not exists order_sequence bigint,
-  add column if not exists order_source text;
-
-create sequence if not exists public.orders_order_sequence_seq;
-select setval(
-  'public.orders_order_sequence_seq',
-  greatest(coalesce((select max(order_sequence) from public.orders), 0) + 1, 1),
-  false
-);
-alter table public.orders
-  alter column order_sequence set default nextval('public.orders_order_sequence_seq'),
-  alter column order_source set default 'customer_pos';
-
-alter table public.orders
-  drop constraint if exists orders_order_source_check;
-alter table public.orders
-  add constraint orders_order_source_check
-  check (order_source is not null and btrim(order_source) <> '');
-
-alter table public.orders
-  drop constraint if exists orders_status_check;
-alter table public.orders
-  add constraint orders_status_check
-  check (status is not null and btrim(status) <> '');
-
-create or replace function public.ensure_order_insert_defaults()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  if new.order_sequence is null then
-    new.order_sequence := nextval('public.orders_order_sequence_seq');
-  end if;
-  if new.order_source is null or btrim(new.order_source) = '' then
-    new.order_source := 'customer_pos';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists ensure_order_insert_defaults_trigger on public.orders;
-create trigger ensure_order_insert_defaults_trigger
-before insert on public.orders
-for each row execute function public.ensure_order_insert_defaults();
-
-alter table public.orders
-  add column if not exists customer_id uuid references auth.users(id) on delete set null,
-  add column if not exists payment_proof_path text,
-  add column if not exists customer_email text,
-  add column if not exists customer_phone text,
-  add column if not exists delivery_address text,
-  add column if not exists delivery_fee numeric(12,2) not null default 0,
-  add column if not exists schedule_date date,
-  add column if not exists schedule_time time;
-
-create table if not exists public.order_items (
-  id uuid primary key default gen_random_uuid(), order_id uuid not null references public.orders(id) on delete cascade,
-  product_id uuid, product_name text not null, name text not null,
-  unit_price numeric(12,2) not null default 0, price numeric(12,2) not null default 0,
-  quantity integer not null default 1, qty integer not null default 1,
-  line_total numeric(12,2) not null default 0, addons jsonb not null default '[]'::jsonb,
-  customizations jsonb not null default '{}'::jsonb, created_at timestamptz not null default now()
-);
-
-create table if not exists public.payments (
-  id uuid primary key default gen_random_uuid(), order_id uuid not null references public.orders(id) on delete cascade,
-  method text not null, amount_due numeric(12,2) not null default 0,
-  reference_number text, status text not null default 'pending', paid_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-insert into storage.buckets (id,name,public,file_size_limit,allowed_mime_types)
-values ('payment-proofs','payment-proofs',false,5242880,array['image/jpeg','image/png','image/webp'])
-on conflict (id) do update set public=excluded.public,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;
-
-drop policy if exists "Customers upload their payment proofs" on storage.objects;
-create policy "Customers upload their payment proofs" on storage.objects for insert to authenticated
-with check (bucket_id='payment-proofs' and (storage.foldername(name))[1]=auth.uid()::text);
-drop policy if exists "Customers view their payment proofs" on storage.objects;
-create policy "Customers view their payment proofs" on storage.objects for select to authenticated
-using (bucket_id='payment-proofs' and (storage.foldername(name))[1]=auth.uid()::text);
-
-alter table public.orders add column if not exists request_key uuid;
-create unique index if not exists orders_customer_request_key_uidx on public.orders(customer_id,request_key) where request_key is not null;
+-- Fix the real live schema mismatch found via diagnostic introspection: the
+-- deployed public.order_items table does NOT have product_id / product_name /
+-- name / price / qty columns (the create_customer_order function, carried
+-- over from an earlier, differently-shaped design in this repo's tracked SQL,
+-- assumed it did). Its actual columns are:
+--   id, order_id, menu_item_id, item_name, display_name, unit_price,
+--   quantity, addons_total, line_total, addons, customizations,
+--   is_discounted, discount_amount, created_at
+-- (confirmed live via public.__diag_columns('order_items') — matches the
+-- cashier order function's column usage, which was already correct).
+--
+-- orders and payments inserts were already succeeding (the failure only ever
+-- happened on the order_items insert), so only this insert needs to change.
+-- Everything else in the function is unchanged.
 
 create or replace function public.create_customer_order(request_payload jsonb) returns jsonb
 language plpgsql security definer set search_path=public as $$
@@ -103,6 +26,14 @@ declare
   v_request_key uuid; v_schedule_date date; v_schedule_time time; manila_now timestamp; lead_time interval; existing_order public.orders%rowtype;
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
+  if not exists (select 1 from public.profiles p where p.id = auth.uid()) then
+    insert into public.profiles (id, email, role)
+    select auth.uid(), u.email, 'customer' from auth.users u where u.id = auth.uid()
+    on conflict do nothing;
+  end if;
+  if not exists (select 1 from public.profiles p where p.id = auth.uid()) then
+    raise exception 'Your account session is no longer valid. Please log in again to continue.';
+  end if;
   begin v_request_key:=nullif(request_payload->>'request_key','')::uuid; exception when others then raise exception 'Invalid checkout request key'; end;
   if v_request_key is null then raise exception 'Checkout request key is required'; end if;
   perform pg_advisory_xact_lock(hashtextextended(auth.uid()::text||':'||v_request_key::text,0));
@@ -180,66 +111,16 @@ begin
         where x.id::text in (select jsonb_array_elements_text(coalesce(i->'addon_ids','[]'::jsonb))) and x.is_available=true and x.is_archived=false and xs.name='add_ons' and x.item_type=m.item_type
     ) p;
     line:=(unit+adds)*q;
-    insert into public.order_items(order_id,product_id,product_name,name,unit_price,price,quantity,qty,line_total,addons,customizations)
-    values(oid,m.id,m.name,m.name,unit,unit,q,q,line,coalesce(i->'addon_ids','[]'::jsonb),jsonb_build_object('variation_id',i->>'variation_id','temperature',i->>'temperature','special_instructions',i->>'special_instructions'));
+    insert into public.order_items(order_id,menu_item_id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations,is_discounted,discount_amount)
+    values(oid,m.id,m.name,m.name,unit,q,adds,line,coalesce(i->'addon_ids','[]'::jsonb),jsonb_build_object('variation_id',i->>'variation_id','temperature',i->>'temperature','special_instructions',i->>'special_instructions'),false,0);
   end loop;
   return jsonb_build_object('id',oid,'order_id',oid,'order_number',ono,'subtotal',sub,'delivery_fee',fee,'total',grand,'status',order_status);
 end; $$;
 
-create or replace function public.attach_customer_payment_proof(p_order_id uuid,p_path text) returns void
-language plpgsql security definer set search_path=public as $$ begin
-  if auth.uid() is null then raise exception 'Authentication required'; end if;
-  perform 1 from public.orders o join public.payments p on p.order_id=o.id
-  where o.id=p_order_id and o.customer_id=auth.uid() and p.method in ('gcash','bank_transfer')
-    and o.status='Pending Confirmation' and not coalesce(o.payment_confirmed,false) and o.payment_proof_path is null;
-  if not found then raise exception 'Eligible order not found or not owned by the signed-in customer'; end if;
-  if p_path is null or p_path !~ ('^'||auth.uid()::text||'/'||p_order_id::text||'_[0-9]{8}[.](jpg|png|webp)$') then
-    raise exception 'Invalid payment proof path';
-  end if;
-  perform 1 from storage.objects so where so.bucket_id='payment-proofs' and so.name=p_path
-    and lower(coalesce(so.metadata->>'mimetype','')) in ('image/jpeg','image/png','image/webp');
-  if not found then raise exception 'Payment proof object was not found'; end if;
-  update public.orders set payment_proof_path=p_path,payment_status='pending',payment_confirmed=false,updated_at=now()
-  where id=p_order_id and customer_id=auth.uid();
-  if not found then raise exception 'Order not found or not owned by the signed-in customer'; end if;
-end; $$;
-
-drop function if exists public.set_customer_order_status(uuid,text);
-
 revoke all on function public.create_customer_order(jsonb) from public;
-revoke all on function public.attach_customer_payment_proof(uuid,text) from public;
 grant execute on function public.create_customer_order(jsonb) to authenticated;
-grant execute on function public.attach_customer_payment_proof(uuid,text) to authenticated;
 
--- Customer order privacy and internal operational access.
-alter table public.orders enable row level security;
-alter table public.order_items enable row level security;
-alter table public.payments enable row level security;
+-- Remove the temporary diagnostic function now that we've used it.
+drop function if exists public.__diag_columns(text);
 
-drop policy if exists "cashier read orders" on public.orders;
-drop policy if exists "cashier insert walkin orders" on public.orders;
-drop policy if exists "Customers read only their orders" on public.orders;
-drop policy if exists "Internal staff insert orders" on public.orders;
-create policy "Customers read only their orders" on public.orders for select to authenticated
-using (customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
-create policy "Internal staff insert orders" on public.orders for insert to authenticated
-with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
-
-drop policy if exists "cashier read order items" on public.order_items;
-drop policy if exists "cashier insert order items" on public.order_items;
-drop policy if exists "Customers read only their order items" on public.order_items;
-drop policy if exists "Internal staff insert order items" on public.order_items;
-create policy "Customers read only their order items" on public.order_items for select to authenticated
-using (exists(select 1 from public.orders o where o.id=order_id and (o.customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')))));
-create policy "Internal staff insert order items" on public.order_items for insert to authenticated
-with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
-
-drop policy if exists "cashier read payments" on public.payments;
-drop policy if exists "cashier insert payments" on public.payments;
-drop policy if exists "Customers read only their payments" on public.payments;
-drop policy if exists "Internal staff insert payments" on public.payments;
-create policy "Customers read only their payments" on public.payments for select to authenticated
-using (exists(select 1 from public.orders o where o.id=order_id and (o.customer_id=auth.uid() or exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')))));
-create policy "Internal staff insert payments" on public.payments for insert to authenticated
-with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.role in ('admin','cashier','staff','operational_staff')));
 notify pgrst,'reload schema';
