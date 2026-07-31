@@ -115,7 +115,6 @@ export default function OrderPreparationPage() {
   const [filtersOpen, setFiltersOpen] = useState(false)
 
   const columnRefs = useRef({})
-
   useEffect(() => { const timer = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(timer) }, [])
 
   const load = async () => {
@@ -221,7 +220,6 @@ export default function OrderPreparationPage() {
   const resolvedCancellations = useMemo(() => orders.filter((o) => stageOf(o) === 'cancelled' && o.cancellation_resolved), [orders])
 
   const attentionCount = orders.filter((o) => stageOf(o) === 'pending' || isOverdue(o)).length
-
   const scrollToColumn = (key) => {
     setActiveTab('board')
     columnRefs.current[key]?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
@@ -234,7 +232,7 @@ export default function OrderPreparationPage() {
           <span>{new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric' }).format(now)}</span>
           <b>{new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).format(now)}</b>
         </div>
-        <button type="button" className="ops-icon-button" aria-label={`${attentionCount} order${attentionCount === 1 ? '' : 's'} need attention`} title="Orders needing attention" onClick={() => scrollToColumn('pending')}>
+        <button type="button" className={`ops-icon-button${attentionCount > 0 ? ' has-attention' : ''}`} aria-label={`${attentionCount} order${attentionCount === 1 ? '' : 's'} need attention`} title="Orders needing attention" onClick={() => scrollToColumn('pending')}>
           <Bell size={18} />
           {attentionCount > 0 && <span className="ops-badge">{attentionCount}</span>}
         </button>
@@ -446,8 +444,8 @@ function CancelGroup({ title, tone, orders, onView, onResolve, resolved, busyId 
 
 function ConfirmModal({ title, message, busy, onCancel, onConfirm }) {
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onCancel() }}>
-      <section className="payment-modal" role="alertdialog" aria-modal="true" aria-labelledby="ops-confirm-title">
+    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onCancel() }}>
+      <section className="payment-modal ops-popup-modal" role="alertdialog" aria-modal="true" aria-labelledby="ops-confirm-title">
         <span className="payment-modal-kicker">Confirm action</span>
         <h2 id="ops-confirm-title">{title}</h2>
         <p>{message}</p>
@@ -464,8 +462,8 @@ function CancelModal({ order, busy, onClose, onConfirm }) {
   const [reason, setReason] = useState('')
   const trimmed = reason.trim()
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
-      <section className="payment-modal" role="alertdialog" aria-modal="true" aria-labelledby="ops-cancel-title">
+    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
+      <section className="payment-modal ops-popup-modal" role="alertdialog" aria-modal="true" aria-labelledby="ops-cancel-title">
         <span className="payment-modal-kicker">Cancel order</span>
         <h2 id="ops-cancel-title">Cancel {order.order_number}?</h2>
         <p>This cannot be undone. Please provide a reason for the customer's record.</p>
