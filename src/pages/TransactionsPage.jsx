@@ -1,55 +1,294 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
-  AlertTriangle, Bell, Ban, Banknote, Check, ChevronDown, Download, ExternalLink, Eye,
-  Package, PhilippinePeso, ReceiptText, RefreshCw, RotateCcw, Search, Settings2, TrendingDown, TrendingUp, Undo2, X,
+  AlertTriangle, Ban, Banknote, Check, ChevronDown, Clock3, Download, ExternalLink, Eye,
+  FileText, Filter, MoreVertical, PhilippinePeso, Printer, ReceiptText, RefreshCw, RotateCcw,
+  Search, Settings2, ShoppingBag, TrendingUp, Undo2, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
 import { money } from '../utils/money'
 import { describeError } from '../utils/describeError'
-import { getCurrentPortalSession } from '../lib/auth'
+import { getCurrentPortalSession, normalizeRole } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import {
-  fetchTransactions, fetchTransactionAudit, getPaymentProofUrl,
-  voidOrder, requestRefund, processRefund, correctPaymentStatus, exportTransactionsToCsv,
+  exportTransactionsToCsv, fetchTransactionAudit, fetchTransactionById, fetchTransactions,
+  fetchTransactionsSummary, fetchTransactionStaffOptions, getPaymentProofUrl, printSummaryReport,
+  processRefund, correctPaymentStatus, requestRefund, voidOrder,
 } from '../services/transactionsService'
 
-const ORDER_STATUSES = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Completed', 'Cancelled', 'Ordered']
-const PAYMENT_METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', bank_transfer: 'Bank Transfer', cod: 'Cash on Delivery' }
-const PAYMENT_STATUS_LABEL = { paid: 'Paid', pending: 'Pending' }
-const REFUND_STATUS_LABEL = { not_applicable: 'N/A', pending: 'Refund Pending', processed: 'Refunded', rejected: 'Refund Rejected' }
-const STATUS_TONE = {
-  'Completed': 'completed', 'Cancelled': 'cancelled', 'Preparing': 'preparing',
-  'Ready for Pickup': 'pickup', 'Out for Delivery': 'delivery', 'Ordered': 'confirmed',
+const ORDER_STATUS_OPTIONS = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Completed', 'Cancelled', 'Ordered']
+const PAYMENT_METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', bank_transfer: 'Bank Transfer', cod: 'Cash on Delivery', other: 'Other' }
+const PAYMENT_STATUS_OPTIONS = [
+  ['all', 'All payment states'],
+  ['pending', 'Pending / unpaid'],
+  ['paid', 'Paid / verified'],
+  ['rejected', 'Rejected'],
+]
+const REFUND_STATUS_OPTIONS = [
+  ['all', 'All refund states'],
+  ['not_applicable', 'No refund'],
+  ['pending', 'Refund pending'],
+  ['processed', 'Refunded'],
+  ['rejected', 'Refund rejected'],
+]
+const QUICK_RANGE_LABEL = { all: 'All Time', today: 'Today', yesterday: 'Yesterday', week: 'This Week', month: 'This Month', custom: 'Custom Range' }
+const TAB_OPTIONS = [
+  ['all', 'All'],
+  ['walk-in', 'Walk-ins'],
+  ['pickup', 'Pick-ups'],
+  ['delivery', 'Delivery'],
+  ['cancelled', 'Cancelled'],
+]
+
+function startCase(value) {
+  return String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase())
 }
-function statusTone(status) {
-  if (STATUS_TONE[status]) return STATUS_TONE[status]
-  if (/pending|awaiting|received/i.test(status)) return 'attention'
-  return 'neutral'
-}
+
 function manilaDayRange(offsetDays = 0) {
   const now = new Date(Date.now() + offsetDays * 86400000)
   const start = new Date(now); start.setHours(0, 0, 0, 0)
   const end = new Date(now); end.setHours(23, 59, 59, 999)
   return { from: start.toISOString(), to: end.toISOString() }
 }
+
 function weekRange() {
   const now = new Date()
   const day = now.getDay()
-  const start = new Date(now); start.setDate(now.getDate() - day); start.setHours(0, 0, 0, 0)
+  const start = new Date(now)
+  start.setDate(now.getDate() - day)
+  start.setHours(0, 0, 0, 0)
   return { from: start.toISOString(), to: new Date().toISOString() }
 }
+
 function monthRange() {
   const now = new Date()
   const start = new Date(now.getFullYear(), now.getMonth(), 1)
   return { from: start.toISOString(), to: new Date().toISOString() }
 }
+
 function formatDateTime(value) {
-  if (!value) return '—'
-  return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(value))
+  if (!value) return '-'
+  return new Intl.DateTimeFormat('en-PH', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(new Date(value))
+}
+
+function formatDateInput(value) {
+  return value ? value.slice(0, 10) : ''
+}
+
+function formatTime(value) {
+  if (!value) return 'To be confirmed'
+  const normalized = String(value).slice(0, 5)
+  const [hour = '00', minute = '00'] = normalized.split(':')
+  const asDate = new Date(`2026-08-02T${hour}:${minute}:00`)
+  return new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', hour12: true }).format(asDate)
+}
+
+function getSourceLabel(transaction) {
+  return transaction.isOnline ? 'Online' : 'Walk-in'
+}
+
+function processedRefundAmount(transaction) {
+  return transaction.refunds.filter((refund) => refund.status === 'processed').reduce((sum, refund) => sum + refund.amount, 0)
+}
+
+function pendingRefund(transaction) {
+  return transaction.refunds.find((refund) => refund.status === 'pending') || null
+}
+
+function refundStatusMeta(transaction) {
+  const processed = processedRefundAmount(transaction)
+  const hasPending = transaction.refunds.some((refund) => refund.status === 'pending')
+  const hasRejected = transaction.refunds.some((refund) => refund.status === 'rejected')
+  if (processed > 0 && processed < transaction.finalTotal) return { key: 'partial', label: 'Partially Refunded', tone: 'attention' }
+  if (processed >= transaction.finalTotal && processed > 0) return { key: 'processed', label: 'Refunded', tone: 'completed' }
+  if (hasPending || transaction.refundStatus === 'pending') return { key: 'pending', label: 'Refund Pending', tone: 'attention' }
+  if (hasRejected || transaction.refundStatus === 'rejected') return { key: 'rejected', label: 'Refund Rejected', tone: 'cancelled' }
+  return { key: 'not_applicable', label: 'No refund', tone: 'neutral' }
+}
+
+function paymentStatusMeta(transaction) {
+  const raw = String(transaction.paymentRecordStatus || transaction.paymentStatus || '').toLowerCase()
+  const refundMeta = refundStatusMeta(transaction)
+  if (transaction.isVoided) return { key: 'voided', label: 'Voided', tone: 'neutral' }
+  if (refundMeta.key === 'processed') return { key: 'refunded', label: 'Refunded', tone: 'cancelled' }
+  if (refundMeta.key === 'partial') return { key: 'partially_refunded', label: 'Partially Refunded', tone: 'attention' }
+  if (refundMeta.key === 'pending') return { key: 'refund_pending', label: 'Refund Pending', tone: 'attention' }
+  if (raw === 'rejected' || raw === 'failed') return { key: 'rejected', label: 'Rejected', tone: 'cancelled' }
+  if (raw === 'verified') return { key: 'verified', label: 'Verified', tone: 'completed' }
+  if (raw === 'paid' || raw === 'confirmed') return { key: 'paid', label: 'Paid', tone: 'completed' }
+  if (raw === 'pending' && (transaction.paymentMethod === 'gcash' || transaction.paymentMethod === 'bank_transfer')) {
+    return { key: 'pending', label: 'Pending Verification', tone: 'attention' }
+  }
+  if (raw === 'pending') return { key: 'unpaid', label: 'Unpaid', tone: 'attention' }
+  return { key: raw || 'unpaid', label: startCase(raw || 'unpaid'), tone: 'neutral' }
+}
+
+function statusTone(status) {
+  if (status === 'Completed') return 'completed'
+  if (status === 'Cancelled') return 'cancelled'
+  if (status === 'Preparing') return 'preparing'
+  if (status === 'Ready for Pickup') return 'pickup'
+  if (status === 'Out for Delivery') return 'delivery'
+  if (status === 'Confirmed' || status === 'Ordered') return 'confirmed'
+  if (/pending|awaiting|received/i.test(status)) return 'attention'
+  return 'neutral'
+}
+
+function isCompletedSale(transaction) {
+  return transaction.status === 'Completed' && paymentStatusMeta(transaction).key === 'paid' && !transaction.isVoided
+}
+
+function buildFilterLabel({ quickRange, dateFrom, dateTo }) {
+  if (quickRange !== 'custom') return QUICK_RANGE_LABEL[quickRange] || QUICK_RANGE_LABEL.all
+  if (!dateFrom && !dateTo) return QUICK_RANGE_LABEL.all
+  if (dateFrom && dateTo) return `${formatDateInput(dateFrom)} to ${formatDateInput(dateTo)}`
+  if (dateFrom) return `From ${formatDateInput(dateFrom)}`
+  return `Until ${formatDateInput(dateTo)}`
+}
+
+function receiptMoney(value) {
+  return `PHP ${Number(value || 0).toFixed(2)}`
+}
+
+function buildReceiptHtml(transaction) {
+  const itemsMarkup = transaction.items.map((item) => {
+    const detailLines = []
+    const customizations = item.customizations || {}
+    ;['variantKey', 'temperature', 'iceLevel', 'sugarLevel'].forEach((key) => {
+      if (customizations[key]) detailLines.push(`${startCase(key)}: ${customizations[key]}`)
+    })
+    ;(item.addons || []).forEach((addon) => {
+      if (typeof addon === 'string') detailLines.push(`Add-on: ${addon}`)
+      else if (addon?.name) detailLines.push(`Add-on: ${addon.name}`)
+    })
+    if (customizations.special_instructions) detailLines.push(`Note: ${customizations.special_instructions}`)
+
+    return `<div class="receipt-item">
+      <div>${item.quantity}</div>
+      <div class="receipt-item-name">
+        ${item.name}
+        ${detailLines.map((line) => `<div class="receipt-option">${line}</div>`).join('')}
+      </div>
+      <div class="receipt-item-price">${receiptMoney(item.lineTotal)}</div>
+    </div>`
+  }).join('')
+
+  const refundMeta = refundStatusMeta(transaction)
+  const paymentMeta = paymentStatusMeta(transaction)
+  const receiptRef = transaction.paymentReference || 'N/A'
+  return `<!doctype html><html><head><title>${transaction.receiptNumber}</title>
+    <style>
+      body{margin:0;background:#f3f4f0;padding:20px;font-family:'Courier New',Courier,monospace}
+      .receipt{width:320px;max-width:100%;margin:0 auto;background:#fff;color:#000;padding:10px 12px;border:1px solid #d9ddd7}
+      .center{text-align:center}.line{border-top:1px dashed #000;margin:8px 0}.row,.total{display:flex;justify-content:space-between;gap:12px;font-size:11px}
+      .label{flex:0 0 118px}.value{flex:1;text-align:right}.header{font-size:16px;font-weight:800;letter-spacing:1px;text-transform:uppercase}
+      .sub{font-size:11px}.table-head,.receipt-item{display:grid;grid-template-columns:24px minmax(0,1fr) 72px;gap:6px;font-size:11px}
+      .table-head{font-weight:800}.receipt-item-price{text-align:right}.receipt-option{font-size:10px}.grand{font-size:14px;font-weight:900}
+    </style></head><body><div class="receipt">
+      <div class="center"><img src="/images/coffeerealmlogo.png" alt="" style="width:42px;height:42px;object-fit:contain;margin:0 auto 4px"/><div class="header">COFFEE REALM</div><div class="sub">Transaction receipt</div></div>
+      <div class="line"></div>
+      <div class="row"><span class="label">Order #</span><span class="value">${transaction.orderNumber}</span></div>
+      <div class="row"><span class="label">Receipt #</span><span class="value">${transaction.receiptNumber}</span></div>
+      <div class="row"><span class="label">Reference #</span><span class="value">${receiptRef}</span></div>
+      <div class="row"><span class="label">Date</span><span class="value">${formatDateTime(transaction.createdAt)}</span></div>
+      <div class="row"><span class="label">Source</span><span class="value">${getSourceLabel(transaction)}</span></div>
+      <div class="row"><span class="label">Fulfillment</span><span class="value">${transaction.fulfillment}</span></div>
+      <div class="row"><span class="label">Payment</span><span class="value">${PAYMENT_METHOD_LABEL[transaction.paymentMethod] || '-'}</span></div>
+      <div class="row"><span class="label">Payment status</span><span class="value">${paymentMeta.label}</span></div>
+      <div class="row"><span class="label">Customer</span><span class="value">${transaction.customerName}</span></div>
+      ${transaction.customerPhone ? `<div class="row"><span class="label">Contact</span><span class="value">${transaction.customerPhone}</span></div>` : ''}
+      ${transaction.deliveryAddress ? `<div class="row"><span class="label">Address</span><span class="value">${transaction.deliveryAddress}</span></div>` : ''}
+      ${transaction.cashierName ? `<div class="row"><span class="label">Staff</span><span class="value">${transaction.cashierName}</span></div>` : ''}
+      ${refundMeta.key !== 'not_applicable' ? `<div class="row"><span class="label">Refund</span><span class="value">${refundMeta.label}</span></div>` : ''}
+      <div class="line"></div>
+      <div class="table-head"><div>QTY</div><div>ITEM</div><div style="text-align:right">PRICE</div></div>
+      <div class="line"></div>
+      ${itemsMarkup}
+      <div class="line"></div>
+      <div class="total"><span>Subtotal</span><span>${receiptMoney(transaction.subtotal)}</span></div>
+      ${transaction.discountAmount > 0 ? `<div class="total"><span>Discount</span><span>- ${receiptMoney(transaction.discountAmount)}</span></div>` : ''}
+      ${transaction.deliveryFee > 0 ? `<div class="total"><span>Delivery Fee</span><span>${receiptMoney(transaction.deliveryFee)}</span></div>` : ''}
+      <div class="total grand"><span>Total</span><span>${receiptMoney(transaction.finalTotal)}</span></div>
+      <div class="total"><span>Item Count</span><span>${transaction.itemCount}</span></div>
+      <div class="line"></div>
+      <div class="center sub">Please keep this receipt for reference.</div>
+    </div></body></html>`
+}
+
+function openReceiptWindow(transaction, shouldPrint = false) {
+  const win = window.open('', '_blank', 'width=460,height=900')
+  if (!win) return false
+  win.document.write(buildReceiptHtml(transaction))
+  win.document.close()
+  if (shouldPrint) {
+    setTimeout(() => {
+      win.focus()
+      win.print()
+    }, 180)
+  }
+  return true
+}
+
+function downloadReceiptHtml(transaction) {
+  const blob = new Blob([buildReceiptHtml(transaction)], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `${transaction.receiptNumber || transaction.orderNumber || 'receipt'}.html`
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+function metricSummary(transactions) {
+  const sales = transactions.filter(isCompletedSale)
+  const refunds = transactions.reduce((sum, transaction) => sum + processedRefundAmount(transaction), 0)
+  const grossSales = sales.reduce((sum, transaction) => sum + transaction.finalTotal, 0)
+  const cancelledOrders = transactions.filter((transaction) => transaction.status === 'Cancelled').length
+  return {
+    totalTransactions: transactions.length,
+    grossSales,
+    netSales: grossSales - refunds,
+    completedSales: sales.length,
+    cancelledOrders,
+    refundedAmount: refunds,
+    averageOrderValue: sales.length ? grossSales / sales.length : 0,
+  }
+}
+
+function reconciliationSummary(transactions) {
+  const byMethod = {}
+  transactions.filter(isCompletedSale).forEach((transaction) => {
+    const label = PAYMENT_METHOD_LABEL[transaction.paymentMethod] || 'Other'
+    byMethod[label] = (byMethod[label] || 0) + transaction.finalTotal
+  })
+  return {
+    byMethod,
+    refunds: transactions.reduce((sum, transaction) => sum + processedRefundAmount(transaction), 0),
+    voids: transactions.filter((transaction) => transaction.isVoided).length,
+  }
+}
+
+function deriveTab(orderSource, fulfillment, orderStatus) {
+  if (orderStatus === 'Cancelled') return 'cancelled'
+  if (orderSource === 'cashier_pos' && fulfillment === 'walk-in') return 'walk-in'
+  if (fulfillment === 'pickup') return 'pickup'
+  if (fulfillment === 'delivery') return 'delivery'
+  return 'all'
 }
 
 export default function TransactionsPage() {
+  const location = useLocation()
   const [transactions, setTransactions] = useState([])
+  const [summaryRows, setSummaryRows] = useState([])
+  const [staffOptions, setStaffOptions] = useState([])
+  const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => new Date())
@@ -68,109 +307,220 @@ export default function TransactionsPage() {
   const [paymentStatus, setPaymentStatus] = useState('all')
   const [orderStatus, setOrderStatus] = useState('all')
   const [refundStatus, setRefundStatus] = useState('all')
+  const [customerType, setCustomerType] = useState('all')
+  const [staffFilter, setStaffFilter] = useState('all')
   const [minAmount, setMinAmount] = useState('')
   const [maxAmount, setMaxAmount] = useState('')
   const [sortBy, setSortBy] = useState('newest')
   const [page, setPage] = useState(1)
-  const pageSize = 20
+  const [pageSize, setPageSize] = useState(20)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [rowMenuId, setRowMenuId] = useState('')
 
-  const [detail, setDetail] = useState(null)
+  const [detailTarget, setDetailTarget] = useState(null)
   const [refundTarget, setRefundTarget] = useState(null)
   const [voidTarget, setVoidTarget] = useState(null)
   const [correctionTarget, setCorrectionTarget] = useState(null)
 
-  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
-  useEffect(() => { getCurrentPortalSession().then(({ profile }) => setProfile(profile)) }, [])
+  const deferredSearch = useDeferredValue(search)
+  const queryRef = useRef(null)
 
-  const load = async () => {
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    getCurrentPortalSession().then(async ({ profile: currentProfile }) => {
+      setProfile(currentProfile)
+      try {
+        const options = await fetchTransactionStaffOptions()
+        setStaffOptions(options)
+      } catch {}
+    })
+  }, [])
+
+  const queryState = useMemo(() => ({
+    page,
+    pageSize,
+    sortBy,
+    search: deferredSearch,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    orderSource,
+    fulfillment,
+    paymentMethod,
+    paymentStatus,
+    orderStatus,
+    refundStatus,
+    customerType,
+    staffId: staffFilter,
+    minAmount,
+    maxAmount,
+  }), [page, pageSize, sortBy, deferredSearch, dateFrom, dateTo, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, refundStatus, customerType, staffFilter, minAmount, maxAmount])
+
+  queryRef.current = queryState
+
+  const pushToast = (type, message) => {
+    const id = crypto.randomUUID()
+    setToasts((current) => [...current, { id, type, message }])
+    setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 4500)
+  }
+
+  const load = async (filters = queryState) => {
     setLoading(true)
     try {
-      const data = await fetchTransactions({ dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, refundStatus })
-      setTransactions(data)
+      const [pageResult, summaryResult] = await Promise.all([
+        fetchTransactions(filters),
+        fetchTransactionsSummary({ ...filters, page: undefined, pageSize: undefined }),
+      ])
+      setTransactions(pageResult.data)
+      setTotalCount(pageResult.count)
+      setSummaryRows(summaryResult)
       setError('')
+      const maxPage = Math.max(1, Math.ceil((pageResult.count || 0) / Math.max(1, filters.pageSize || 20)))
+      if (filters.page > maxPage) setPage(maxPage)
     } catch (cause) {
       setError(describeError(cause, 'Could not load transactions.'))
     } finally {
       setLoading(false)
     }
   }
-  useEffect(() => { load() }, [dateFrom, dateTo, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, refundStatus])
+
+  useEffect(() => { load(queryState) }, [queryState])
 
   useEffect(() => {
+    const refresh = () => load(queryRef.current)
     const channel = supabase
       .channel('transactions-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'refunds' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'refunds' }, refresh)
       .subscribe()
-    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
     document.addEventListener('visibilitychange', onVisible)
-    return () => { supabase.removeChannel(channel); document.removeEventListener('visibilitychange', onVisible) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
-  const pushToast = (type, message) => {
-    const id = crypto.randomUUID()
-    setToasts((c) => [...c, { id, type, message }])
-    setTimeout(() => setToasts((c) => c.filter((t) => t.id !== id)), 4500)
-  }
+  const shellRole = location.pathname.startsWith('/admin') ? 'admin' : 'staff'
+  const canManageFinancialActions = ['admin', 'staff', 'operational_staff'].includes(normalizeRole(profile?.role))
+  const activeTab = deriveTab(orderSource, fulfillment, orderStatus)
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+  const summary = useMemo(() => metricSummary(summaryRows), [summaryRows])
+  const reconciliation = useMemo(() => reconciliationSummary(summaryRows), [summaryRows])
+  const filterRangeLabel = useMemo(() => buildFilterLabel({ quickRange, dateFrom, dateTo }), [quickRange, dateFrom, dateTo])
+
+  const activeFilterChips = useMemo(() => {
+    const chips = []
+    if (quickRange !== 'all') chips.push({ key: 'range', label: QUICK_RANGE_LABEL[quickRange], onRemove: () => applyQuickRange('all') })
+    if (search.trim()) chips.push({ key: 'search', label: `Search: "${search.trim()}"`, onRemove: () => { setSearch(''); setPage(1) } })
+    if (orderSource !== 'all') chips.push({ key: 'source', label: orderSource === 'customer_pos' ? 'Online' : 'Walk-in source', onRemove: () => { setOrderSource('all'); setPage(1) } })
+    if (fulfillment !== 'all') chips.push({ key: 'fulfillment', label: `Fulfillment: ${startCase(fulfillment)}`, onRemove: () => { setFulfillment('all'); setPage(1) } })
+    if (paymentMethod !== 'all') chips.push({ key: 'method', label: PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod, onRemove: () => { setPaymentMethod('all'); setPage(1) } })
+    if (paymentStatus !== 'all') chips.push({ key: 'paymentStatus', label: PAYMENT_STATUS_OPTIONS.find(([value]) => value === paymentStatus)?.[1] || paymentStatus, onRemove: () => { setPaymentStatus('all'); setPage(1) } })
+    if (orderStatus !== 'all') chips.push({ key: 'orderStatus', label: orderStatus, onRemove: () => { setOrderStatus('all'); setPage(1) } })
+    if (refundStatus !== 'all') chips.push({ key: 'refundStatus', label: REFUND_STATUS_OPTIONS.find(([value]) => value === refundStatus)?.[1] || refundStatus, onRemove: () => { setRefundStatus('all'); setPage(1) } })
+    if (customerType !== 'all') chips.push({ key: 'customerType', label: customerType === 'registered' ? 'Registered' : 'Guest', onRemove: () => { setCustomerType('all'); setPage(1) } })
+    if (staffFilter !== 'all') chips.push({ key: 'staff', label: `Staff: ${staffOptions.find((staff) => staff.id === staffFilter)?.name || 'Selected'}`, onRemove: () => { setStaffFilter('all'); setPage(1) } })
+    if (minAmount !== '') chips.push({ key: 'minAmount', label: `Min ${money(Number(minAmount || 0))}`, onRemove: () => { setMinAmount(''); setPage(1) } })
+    if (maxAmount !== '') chips.push({ key: 'maxAmount', label: `Max ${money(Number(maxAmount || 0))}`, onRemove: () => { setMaxAmount(''); setPage(1) } })
+    return chips
+  }, [quickRange, search, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, refundStatus, customerType, staffFilter, staffOptions, minAmount, maxAmount])
+
+  const hasActiveFilters = activeFilterChips.length > 0
 
   const applyQuickRange = (key) => {
     setQuickRange(key)
     setPage(1)
     if (key === 'all') { setDateFrom(''); setDateTo(''); return }
-    if (key === 'today') { const r = manilaDayRange(0); setDateFrom(r.from); setDateTo(r.to); return }
-    if (key === 'yesterday') { const r = manilaDayRange(-1); setDateFrom(r.from); setDateTo(r.to); return }
-    if (key === 'week') { const r = weekRange(); setDateFrom(r.from); setDateTo(r.to); return }
-    if (key === 'month') { const r = monthRange(); setDateFrom(r.from); setDateTo(r.to); return }
+    if (key === 'today') { const range = manilaDayRange(0); setDateFrom(range.from); setDateTo(range.to); return }
+    if (key === 'yesterday') { const range = manilaDayRange(-1); setDateFrom(range.from); setDateTo(range.to); return }
+    if (key === 'week') { const range = weekRange(); setDateFrom(range.from); setDateTo(range.to); return }
+    if (key === 'month') { const range = monthRange(); setDateFrom(range.from); setDateTo(range.to); return }
   }
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const min = minAmount !== '' ? Number(minAmount) : null
-    const max = maxAmount !== '' ? Number(maxAmount) : null
-    return transactions.filter((t) => {
-      if (min !== null && t.finalTotal < min) return false
-      if (max !== null && t.finalTotal > max) return false
-      if (!q) return true
-      return [
-        t.orderNumber, t.receiptNumber, t.customerName, t.customerEmail, t.customerPhone,
-        t.paymentReference, t.cashierName, ...t.items.map((i) => i.name),
-      ].some((field) => String(field || '').toLowerCase().includes(q))
-    })
-  }, [transactions, search, minAmount, maxAmount])
-
-  const sorted = useMemo(() => {
-    const list = [...filtered]
-    if (sortBy === 'newest') list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    else if (sortBy === 'oldest') list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-    else if (sortBy === 'highest') list.sort((a, b) => b.finalTotal - a.finalTotal)
-    else if (sortBy === 'lowest') list.sort((a, b) => a.finalTotal - b.finalTotal)
-    return list
-  }, [filtered, sortBy])
-
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize))
-  const pageItems = sorted.slice((page - 1) * pageSize, page * pageSize)
-
-  const summary = useMemo(() => {
-    const completedPaid = filtered.filter((t) => t.status === 'Completed' && t.paymentStatus === 'paid' && !t.isVoided)
-    const grossSales = completedPaid.reduce((s, t) => s + t.finalTotal, 0)
-    const discounts = completedPaid.reduce((s, t) => s + t.discountAmount, 0)
-    const deliveryFees = completedPaid.reduce((s, t) => s + t.deliveryFee, 0)
-    const cancelled = filtered.filter((t) => t.status === 'Cancelled').length
-    const refundedAmount = filtered.reduce((s, t) => s + t.refunds.filter((r) => r.status === 'processed').reduce((rs, r) => rs + r.amount, 0), 0)
-    return {
-      total: filtered.length,
-      completedCount: completedPaid.length,
-      grossSales, discounts, deliveryFees, cancelled, refundedAmount,
-      netSales: grossSales - refundedAmount,
+  const applyTab = (tab) => {
+    setPage(1)
+    if (tab === 'all') {
+      setOrderStatus('all')
+      setOrderSource('all')
+      setFulfillment('all')
+      return
     }
-  }, [filtered])
+    if (tab === 'cancelled') {
+      setOrderStatus('Cancelled')
+      setOrderSource('all')
+      setFulfillment('all')
+      return
+    }
+    setOrderStatus('all')
+    if (tab === 'walk-in') {
+      setOrderSource('cashier_pos')
+      setFulfillment('walk-in')
+      return
+    }
+    setOrderSource('all')
+    setFulfillment(tab)
+  }
 
-  const hasActiveFilters = quickRange !== 'all' || search || orderSource !== 'all' || fulfillment !== 'all' || paymentMethod !== 'all' || paymentStatus !== 'all' || orderStatus !== 'all' || refundStatus !== 'all' || minAmount !== '' || maxAmount !== ''
   const resetFilters = () => {
-    setQuickRange('all'); setDateFrom(''); setDateTo(''); setSearch(''); setOrderSource('all'); setFulfillment('all')
-    setPaymentMethod('all'); setPaymentStatus('all'); setOrderStatus('all'); setRefundStatus('all'); setMinAmount(''); setMaxAmount(''); setPage(1)
+    setQuickRange('all')
+    setDateFrom('')
+    setDateTo('')
+    setSearch('')
+    setOrderSource('all')
+    setFulfillment('all')
+    setPaymentMethod('all')
+    setPaymentStatus('all')
+    setOrderStatus('all')
+    setRefundStatus('all')
+    setCustomerType('all')
+    setStaffFilter('all')
+    setMinAmount('')
+    setMaxAmount('')
+    setSortBy('newest')
+    setPage(1)
+    setFiltersOpen(false)
+  }
+
+  const viewReceipt = (transaction) => {
+    if (!openReceiptWindow(transaction)) pushToast('error', 'The receipt window was blocked by the browser.')
+    setRowMenuId('')
+  }
+
+  const printReceipt = (transaction) => {
+    if (!openReceiptWindow(transaction, true)) pushToast('error', 'The print window was blocked by the browser.')
+    setRowMenuId('')
+  }
+
+  const downloadReceipt = (transaction) => {
+    downloadReceiptHtml(transaction)
+    pushToast('success', `Downloaded receipt for ${transaction.receiptNumber}.`)
+    setRowMenuId('')
+  }
+
+  const viewPaymentProof = async (transaction) => {
+    try {
+      const url = await getPaymentProofUrl(transaction.paymentProofPath)
+      if (!url) throw new Error('No payment proof is available for this transaction.')
+      window.open(url, '_blank', 'noopener,noreferrer')
+      setRowMenuId('')
+    } catch (cause) {
+      pushToast('error', describeError(cause, 'Could not open the payment proof.'))
+    }
+  }
+
+  const viewRelatedOrder = (transaction) => {
+    setDetailTarget(transaction)
+    setRowMenuId('')
+  }
+
+  const openDetails = (transaction) => {
+    setDetailTarget(transaction)
+    setRowMenuId('')
   }
 
   const runVoid = async (reason) => {
@@ -179,7 +529,7 @@ export default function TransactionsPage() {
       await voidOrder(voidTarget.id, reason)
       pushToast('success', `${voidTarget.orderNumber} was voided.`)
       setVoidTarget(null)
-      await load()
+      await load(queryRef.current)
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not void this transaction.'))
     } finally {
@@ -193,7 +543,7 @@ export default function TransactionsPage() {
       await requestRefund({ orderId: refundTarget.id, amount, reason, method })
       pushToast('success', `Refund requested for ${refundTarget.orderNumber}.`)
       setRefundTarget(null)
-      await load()
+      await load(queryRef.current)
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not request this refund.'))
     } finally {
@@ -206,8 +556,11 @@ export default function TransactionsPage() {
     try {
       await processRefund({ refundId: refund.id, approve, referenceNumber: refund.referenceNumber })
       pushToast('success', approve ? 'Refund marked as processed.' : 'Refund rejected.')
-      await load()
-      setDetail((d) => d && ({ ...d }))
+      await load(queryRef.current)
+      if (detailTarget?.id) {
+        const fresh = await fetchTransactionById(detailTarget.id)
+        if (fresh) setDetailTarget(fresh)
+      }
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not update this refund.'))
     } finally {
@@ -221,7 +574,7 @@ export default function TransactionsPage() {
       await correctPaymentStatus({ orderId: correctionTarget.id, newStatus, reason })
       pushToast('success', `Payment status corrected for ${correctionTarget.orderNumber}.`)
       setCorrectionTarget(null)
-      await load()
+      await load(queryRef.current)
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not correct the payment status.'))
     } finally {
@@ -229,166 +582,336 @@ export default function TransactionsPage() {
     }
   }
 
-  const runExport = () => {
-    const csv = exportTransactionsToCsv(sorted, profile?.full_name || profile?.email)
+  const runExportCsv = () => {
+    const csv = exportTransactionsToCsv(summaryRows, profile?.full_name || profile?.email)
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `transactions-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `transactions-${new Date().toISOString().slice(0, 10)}.csv`
+    anchor.click()
     URL.revokeObjectURL(url)
-    pushToast('success', `Exported ${sorted.length} transaction${sorted.length === 1 ? '' : 's'}.`)
+    pushToast('success', `Exported ${summaryRows.length} transaction${summaryRows.length === 1 ? '' : 's'}.`)
+    setExportMenuOpen(false)
+  }
+
+  const runExportPdfSummary = () => {
+    printSummaryReport({
+      summary,
+      reconciliation,
+      filterLabel: filterRangeLabel,
+      generatedBy: profile?.full_name || profile?.email,
+    })
+    setExportMenuOpen(false)
+  }
+
+  const runPrintReport = () => {
+    window.print()
+    setExportMenuOpen(false)
   }
 
   return (
-    <AppShell role="staff" title="Transactions" eyebrow="Review order and payment history across all channels." actions={
+    <AppShell role={shellRole} title="Transactions" eyebrow="Review payments, receipts, refunds, voids, and filtered sales history in one place." actions={
       <div className="ops-header-actions">
         <div className="ops-clock">
-          <span>{new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric' }).format(now)}</span>
-          <b>{new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', hour12: true }).format(now)}</b>
+          <span>{new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(now)}</span>
+          <b>{new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).format(now)} PHT</b>
         </div>
-        <button type="button" className="ops-icon-button" aria-label="Refresh transactions" title="Refresh" onClick={load} disabled={loading}>
+        <button type="button" className="ops-icon-button" aria-label="Refresh transactions" title="Refresh" onClick={() => load(queryRef.current)} disabled={loading}>
           <RefreshCw size={18} className={loading ? 'spin' : ''} />
         </button>
-        <button type="button" className="ops-main-action inv-record-btn" onClick={runExport} disabled={loading || sorted.length === 0}><Download size={16} /> Export CSV</button>
-      </div>
-    }>
-      {error && <p className="form-error">{error}</p>}
-
-      <div className="inv-summary-row txn-summary-row">
-        <div className="inv-summary-card tone-neutral"><ReceiptText size={18} /><span>Total Transactions</span><b>{summary.total}</b></div>
-        <div className="inv-summary-card tone-green"><Check size={18} /><span>Completed Sales</span><b>{summary.completedCount}</b></div>
-        <div className="inv-summary-card tone-blue"><TrendingUp size={18} /><span>Gross Sales</span><b>{money(summary.grossSales)}</b></div>
-        <div className="inv-summary-card tone-amber"><Banknote size={18} /><span>Discounts</span><b>{money(summary.discounts)}</b></div>
-        <div className="inv-summary-card tone-blue"><Package size={18} /><span>Delivery Fees</span><b>{money(summary.deliveryFees)}</b></div>
-        <div className="inv-summary-card tone-red"><Ban size={18} /><span>Cancelled Orders</span><b>{summary.cancelled}</b></div>
-        <div className="inv-summary-card tone-red"><Undo2 size={18} /><span>Refunded Amount</span><b>{money(summary.refundedAmount)}</b></div>
-        <div className="inv-summary-card tone-green"><PhilippinePeso size={18} /><span>Net Sales</span><b>{money(summary.netSales)}</b></div>
-      </div>
-
-      <div className="menu-manage-tools">
-        <label className="menu-manage-search">
-          <Search size={17} /><span className="sr-only">Search transactions</span>
-          <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Search order #, receipt, customer, product, reference…" />
-          {search && <button type="button" className="menu-manage-search-clear" aria-label="Clear search" onClick={() => setSearch('')}><X size={14} /></button>}
-        </label>
-        <div className="menu-manage-chip-row">
-          {[['all', 'All Time'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This Week'], ['month', 'This Month']].map(([key, label]) => (
-            <button type="button" key={key} className={`menu-manage-chip ${quickRange === key ? 'active' : ''}`} onClick={() => applyQuickRange(key)}>{label}</button>
-          ))}
+        <div className="inv-overflow">
+          <button type="button" className="ops-main-action inv-record-btn" onClick={() => setExportMenuOpen((open) => !open)} disabled={loading || summaryRows.length === 0}>
+            <Download size={16} /> Export <ChevronDown size={14} />
+          </button>
+          {exportMenuOpen && (
+            <div className="inv-overflow-menu txn-export-menu" role="menu">
+              <button type="button" role="menuitem" onClick={runExportCsv}><FileText size={14} /> Export CSV</button>
+              <button type="button" role="menuitem" onClick={runExportPdfSummary}><ReceiptText size={14} /> Export PDF Summary</button>
+              <button type="button" role="menuitem" onClick={runPrintReport}><Printer size={14} /> Print Filtered Report</button>
+            </div>
+          )}
         </div>
       </div>
+    }>
+      {error && !loading && <p className="form-error">{error}</p>}
 
-      <div className="inv-toolbar">
-        <button type="button" className="ops-secondary-action compact" onClick={() => setFiltersOpen((v) => !v)}><Settings2 size={14} /> Filters <ChevronDown size={14} className={filtersOpen ? 'rotated' : ''} /></button>
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort">
-          <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
-          <option value="highest">Highest total</option><option value="lowest">Lowest total</option>
-        </select>
-        {hasActiveFilters && <button type="button" className="ops-destructive-action compact" onClick={resetFilters}>Reset Filters</button>}
-      </div>
-
-      {filtersOpen && (
-        <div className="inv-toolbar menu-extra-filters">
-          <label className="field compact"><span>From</span><input type="date" value={dateFrom ? dateFrom.slice(0, 10) : ''} onChange={(e) => { setQuickRange('custom'); setDateFrom(e.target.value ? new Date(e.target.value + 'T00:00:00').toISOString() : '') }} /></label>
-          <label className="field compact"><span>To</span><input type="date" value={dateTo ? dateTo.slice(0, 10) : ''} onChange={(e) => { setQuickRange('custom'); setDateTo(e.target.value ? new Date(e.target.value + 'T23:59:59').toISOString() : '') }} /></label>
-          <select value={orderSource} onChange={(e) => setOrderSource(e.target.value)} aria-label="Order source">
-            <option value="all">Online + Walk-in</option><option value="customer_pos">Online</option><option value="cashier_pos">Walk-in</option>
-          </select>
-          <select value={fulfillment} onChange={(e) => setFulfillment(e.target.value)} aria-label="Fulfillment">
-            <option value="all">All fulfillment</option><option value="delivery">Delivery</option><option value="pickup">Pickup</option><option value="walk-in">Walk-in</option>
-          </select>
-          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} aria-label="Payment method">
-            <option value="all">All payment methods</option>
-            {Object.entries(PAYMENT_METHOD_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-          <select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)} aria-label="Payment status">
-            <option value="all">All payment statuses</option>
-            {Object.entries(PAYMENT_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-          <select value={orderStatus} onChange={(e) => setOrderStatus(e.target.value)} aria-label="Order status">
-            <option value="all">All order statuses</option>
-            {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select value={refundStatus} onChange={(e) => setRefundStatus(e.target.value)} aria-label="Refund status">
-            <option value="all">All refund statuses</option>
-            {Object.entries(REFUND_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-          <label className="field compact"><span>Min amount</span><input type="number" min="0" value={minAmount} onChange={(e) => { setMinAmount(e.target.value); setPage(1) }} /></label>
-          <label className="field compact"><span>Max amount</span><input type="number" min="0" value={maxAmount} onChange={(e) => { setMaxAmount(e.target.value); setPage(1) }} /></label>
+      {loading && summaryRows.length === 0 ? (
+        <div className="txn-metric-grid">
+          {Array.from({ length: 7 }).map((_, index) => <div className="inv-skeleton-row txn-metric-skeleton" key={index} />)}
+        </div>
+      ) : (
+        <div className="inv-summary-row txn-summary-row dash-fade-in">
+          <div className="inv-summary-card tone-neutral"><ReceiptText size={18} /><span>Total Transactions</span><b>{summary.totalTransactions}</b></div>
+          <div className="inv-summary-card tone-blue"><TrendingUp size={18} /><span>Gross Sales</span><b>{money(summary.grossSales)}</b></div>
+          <div className="inv-summary-card tone-green"><PhilippinePeso size={18} /><span>Net Sales</span><b>{money(summary.netSales)}</b></div>
+          <div className="inv-summary-card tone-green"><Check size={18} /><span>Completed Sales</span><b>{summary.completedSales}</b></div>
+          <div className="inv-summary-card tone-red"><Ban size={18} /><span>Cancelled Orders</span><b>{summary.cancelledOrders}</b></div>
+          <div className="inv-summary-card tone-red"><Undo2 size={18} /><span>Refunded Amount</span><b>{money(summary.refundedAmount)}</b></div>
+          <div className="inv-summary-card tone-amber"><Banknote size={18} /><span>Average Order Value</span><b>{money(summary.averageOrderValue)}</b></div>
         </div>
       )}
 
+      <div className="txn-toolbar-shell">
+        <div className="menu-manage-tools txn-toolbar-main">
+          <label className="menu-manage-search">
+            <Search size={17} /><span className="sr-only">Search transactions</span>
+            <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder="Search order #, receipt, customer, email, phone..." />
+            {search && <button type="button" className="menu-manage-search-clear" aria-label="Clear search" onClick={() => { setSearch(''); setPage(1) }}><X size={14} /></button>}
+          </label>
+          <div className="menu-manage-chip-row">
+            {[['all', 'All Time'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This Week'], ['month', 'This Month']].map(([key, label]) => (
+              <button type="button" key={key} className={`menu-manage-chip ${quickRange === key ? 'active' : ''}`} onClick={() => applyQuickRange(key)}>{label}</button>
+            ))}
+            <button type="button" className={`menu-manage-chip ${quickRange === 'custom' ? 'active' : ''}`} onClick={() => { setQuickRange('custom'); setFiltersOpen(true) }}>Custom</button>
+          </div>
+        </div>
+
+        <div className="txn-tab-row" role="tablist" aria-label="Common transaction views">
+          {TAB_OPTIONS.map(([value, label]) => (
+            <button type="button" key={value} className={`txn-tab ${activeTab === value ? 'active' : ''}`} onClick={() => applyTab(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="inv-toolbar txn-toolbar-actions">
+          <button type="button" className="ops-secondary-action compact" onClick={() => setFiltersOpen((open) => !open)}><Filter size={14} /> Filters <ChevronDown size={14} className={filtersOpen ? 'rotated' : ''} /></button>
+          <select value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Sort transactions">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="highest">Highest amount</option>
+            <option value="lowest">Lowest amount</option>
+          </select>
+          <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }} aria-label="Rows per page">
+            <option value={10}>10 / page</option>
+            <option value={20}>20 / page</option>
+            <option value={50}>50 / page</option>
+            <option value={100}>100 / page</option>
+          </select>
+          <div className="txn-result-meta">
+            <b>{totalCount}</b>
+            <span>{filterRangeLabel}</span>
+          </div>
+          {hasActiveFilters && <button type="button" className="ops-destructive-action compact" onClick={resetFilters}>Reset All</button>}
+        </div>
+      </div>
+
+      {filtersOpen && (
+        <>
+          <button type="button" className="txn-filter-backdrop" aria-label="Close filters" onClick={() => setFiltersOpen(false)} />
+          <div className="txn-filter-panel">
+            <div className="txn-filter-panel-head">
+              <div>
+                <span className="settings-kicker">Transaction filters</span>
+                <h3>Refine this sales history view</h3>
+              </div>
+              <button type="button" className="ops-icon-button" aria-label="Close filters" onClick={() => setFiltersOpen(false)}><X size={18} /></button>
+            </div>
+
+            <div className="txn-filter-grid">
+              <label className="field compact"><span>Date from</span><input type="date" value={formatDateInput(dateFrom)} onChange={(event) => { setQuickRange('custom'); setDateFrom(event.target.value ? new Date(`${event.target.value}T00:00:00`).toISOString() : ''); setPage(1) }} /></label>
+              <label className="field compact"><span>Date to</span><input type="date" value={formatDateInput(dateTo)} onChange={(event) => { setQuickRange('custom'); setDateTo(event.target.value ? new Date(`${event.target.value}T23:59:59`).toISOString() : ''); setPage(1) }} /></label>
+              <select value={orderSource} onChange={(event) => { setOrderSource(event.target.value); setPage(1) }} aria-label="Order source">
+                <option value="all">All order sources</option>
+                <option value="customer_pos">Online</option>
+                <option value="cashier_pos">Walk-in</option>
+              </select>
+              <select value={fulfillment} onChange={(event) => { setFulfillment(event.target.value); setPage(1) }} aria-label="Order type">
+                <option value="all">All order types</option>
+                <option value="delivery">Delivery</option>
+                <option value="pickup">Pickup</option>
+                <option value="walk-in">Walk-in</option>
+              </select>
+              <select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setPage(1) }} aria-label="Payment method">
+                <option value="all">All payment methods</option>
+                {Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <select value={paymentStatus} onChange={(event) => { setPaymentStatus(event.target.value); setPage(1) }} aria-label="Payment status">
+                {PAYMENT_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <select value={orderStatus} onChange={(event) => { setOrderStatus(event.target.value); setPage(1) }} aria-label="Order status">
+                <option value="all">All order statuses</option>
+                {ORDER_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+              <select value={refundStatus} onChange={(event) => { setRefundStatus(event.target.value); setPage(1) }} aria-label="Refund status">
+                {REFUND_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <select value={customerType} onChange={(event) => { setCustomerType(event.target.value); setPage(1) }} aria-label="Customer type">
+                <option value="all">Registered + Guest</option>
+                <option value="registered">Registered</option>
+                <option value="guest">Guest</option>
+              </select>
+              <select value={staffFilter} onChange={(event) => { setStaffFilter(event.target.value); setPage(1) }} aria-label="Staff or cashier">
+                <option value="all">All staff / cashiers</option>
+                {staffOptions.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
+              </select>
+              <label className="field compact"><span>Minimum amount</span><input type="number" min="0" value={minAmount} onChange={(event) => { setMinAmount(event.target.value); setPage(1) }} /></label>
+              <label className="field compact"><span>Maximum amount</span><input type="number" min="0" value={maxAmount} onChange={(event) => { setMaxAmount(event.target.value); setPage(1) }} /></label>
+            </div>
+
+            <div className="payment-modal-actions txn-filter-actions">
+              <button className="secondary-button" type="button" onClick={resetFilters}>Reset All</button>
+              <button className="primary-button" type="button" onClick={() => setFiltersOpen(false)}>Apply Filters</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {hasActiveFilters && (
+        <div className="txn-chip-row">
+          {activeFilterChips.map((chip) => (
+            <span className="txn-filter-chip" key={chip.key}>
+              {chip.label}
+              <button type="button" onClick={chip.onRemove} aria-label={`Remove ${chip.label} filter`}><X size={12} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="panel dash-panel txn-reconciliation">
+        <div className="panel-head">
+          <div><span>Payment Summary</span><small>Reconciliation for the current filtered period</small></div>
+        </div>
+        <div className="txn-reconciliation-grid">
+          {Object.entries(reconciliation.byMethod).map(([label, amount]) => (
+            <div className="txn-reconciliation-item" key={label}><span>{label}</span><b>{money(amount)}</b></div>
+          ))}
+          <div className="txn-reconciliation-item tone-red"><span>Refunds</span><b>{money(reconciliation.refunds)}</b></div>
+          <div className="txn-reconciliation-item tone-red"><span>Voids</span><b>{reconciliation.voids}</b></div>
+          {Object.keys(reconciliation.byMethod).length === 0 && reconciliation.refunds === 0 && reconciliation.voids === 0 && <p className="ops-proof-pending">No settled transactions for this filter set yet.</p>}
+        </div>
+      </div>
+
       {loading ? (
-        <div className="inv-skeleton">{Array.from({ length: 6 }).map((_, i) => <div className="inv-skeleton-row" key={i} />)}</div>
-      ) : pageItems.length === 0 ? (
-        <div className="inv-empty"><ReceiptText size={28} /><h3>No transactions found</h3><p>Try adjusting your filters or date range.</p></div>
+        <div className="txn-loading-shell">
+          <div className="inv-skeleton">{Array.from({ length: 7 }).map((_, index) => <div className="inv-skeleton-row" key={index} />)}</div>
+        </div>
+      ) : error ? (
+        <div className="inv-empty"><AlertTriangle size={28} /><h3>Could not load transactions</h3><p>{error}</p><button type="button" className="ops-main-action" onClick={() => load(queryRef.current)}>Retry</button></div>
+      ) : transactions.length === 0 ? (
+        <div className="inv-empty"><ReceiptText size={28} /><h3>No transactions found</h3><p>Try adjusting your filters, date range, or amount limits.</p></div>
       ) : (
         <>
+          <div className="txn-table-summary">
+            <span>{totalCount} result{totalCount === 1 ? '' : 's'}</span>
+            <b>Sorted by {sortBy === 'newest' ? 'Newest' : sortBy === 'oldest' ? 'Oldest' : sortBy === 'highest' ? 'Highest amount' : 'Lowest amount'}</b>
+          </div>
+
           <div className="inv-table-wrap">
             <table className="inv-table txn-table">
               <thead>
                 <tr>
-                  <th>Order</th><th>Date</th><th>Customer</th><th>Source</th><th>Fulfillment</th><th>Items</th>
-                  <th>Payment</th><th>Order Status</th><th>Refund</th><th>Staff</th><th>Total</th><th aria-label="Actions" />
+                  <th>Order #</th>
+                  <th>Receipt / Ref</th>
+                  <th>Customer</th>
+                  <th>Date &amp; Time</th>
+                  <th>Source</th>
+                  <th>Fulfillment</th>
+                  <th>Items</th>
+                  <th>Payment Method</th>
+                  <th>Payment Status</th>
+                  <th>Order Status</th>
+                  <th>Staff / Cashier</th>
+                  <th>Refund</th>
+                  <th>Total</th>
+                  <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
-                {pageItems.map((t) => (
-                  <tr key={t.id} className={t.isVoided ? 'txn-row-voided' : ''}>
-                    <td><b>{t.orderNumber}</b><br /><small>{t.receiptNumber}</small></td>
-                    <td>{formatDateTime(t.createdAt)}</td>
-                    <td>{t.customerName}</td>
-                    <td>{t.isOnline ? 'Online' : 'Walk-in'}</td>
-                    <td>{t.fulfillment}</td>
-                    <td>{t.itemCount}</td>
-                    <td>{PAYMENT_METHOD_LABEL[t.paymentMethod] || '—'}<br /><span className={`status-chip status-chip--${t.paymentStatus === 'paid' ? 'completed' : 'attention'}`}>{PAYMENT_STATUS_LABEL[t.paymentStatus] || t.paymentStatus}</span></td>
-                    <td><span className={`status-chip status-chip--${statusTone(t.status)}`}>{t.isVoided ? 'Voided' : t.status}</span></td>
-                    <td>{t.refundStatus !== 'not_applicable' ? <span className={`status-chip status-chip--${t.refundStatus === 'processed' ? 'completed' : t.refundStatus === 'rejected' ? 'cancelled' : 'attention'}`}>{REFUND_STATUS_LABEL[t.refundStatus]}</span> : '—'}</td>
-                    <td>{t.cashierName || (t.isOnline ? '—' : 'Unknown')}</td>
-                    <td><b>{money(t.finalTotal)}</b></td>
-                    <td><button type="button" className="ops-secondary-action compact" onClick={() => setDetail(t)}><Eye size={14} /> View</button></td>
-                  </tr>
-                ))}
+                {transactions.map((transaction) => {
+                  const paymentMeta = paymentStatusMeta(transaction)
+                  const refundMeta = refundStatusMeta(transaction)
+                  return (
+                    <tr key={transaction.id} className={`txn-row-in ${transaction.isVoided ? 'txn-row-voided' : ''}`}>
+                      <td><b>{transaction.orderNumber}</b></td>
+                      <td><b>{transaction.receiptNumber}</b><br /><small>{transaction.paymentReference || 'No payment reference'}</small></td>
+                      <td>{transaction.customerName}<br /><small>{transaction.isGuest ? 'Guest customer' : 'Registered customer'}</small></td>
+                      <td>{formatDateTime(transaction.createdAt)}</td>
+                      <td>{getSourceLabel(transaction)}</td>
+                      <td>{transaction.fulfillment}</td>
+                      <td>{transaction.itemCount}</td>
+                      <td>{PAYMENT_METHOD_LABEL[transaction.paymentMethod] || '-'}</td>
+                      <td><span className={`status-chip status-chip--${paymentMeta.tone}`}>{paymentMeta.label}</span></td>
+                      <td><span className={`status-chip status-chip--${statusTone(transaction.isVoided ? 'Voided' : transaction.status)}`}>{transaction.isVoided ? 'Voided' : transaction.status}</span></td>
+                      <td>{transaction.cashierName || '-'}</td>
+                      <td><span className={`status-chip status-chip--${refundMeta.tone}`}>{refundMeta.label}</span></td>
+                      <td><b>{money(transaction.finalTotal)}</b></td>
+                      <td>
+                        <RowActionsMenu
+                          transaction={transaction}
+                          open={rowMenuId === transaction.id}
+                          canManageFinancialActions={canManageFinancialActions}
+                          onToggle={() => setRowMenuId((current) => (current === transaction.id ? '' : transaction.id))}
+                          onViewDetails={() => openDetails(transaction)}
+                          onViewReceipt={() => viewReceipt(transaction)}
+                          onPrintReceipt={() => printReceipt(transaction)}
+                          onDownloadReceipt={() => downloadReceipt(transaction)}
+                          onViewProof={() => viewPaymentProof(transaction)}
+                          onViewRelatedOrder={() => viewRelatedOrder(transaction)}
+                          onRequestRefund={() => { setRefundTarget(transaction); setRowMenuId('') }}
+                          onProcessRefund={() => { setDetailTarget(transaction); setRowMenuId('') }}
+                          onVoid={() => { setVoidTarget(transaction); setRowMenuId('') }}
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
 
           <div className="inv-cards txn-cards">
-            {pageItems.map((t) => (
-              <article className={`inv-card txn-card ${t.isVoided ? 'txn-row-voided' : ''}`} key={t.id}>
-                <div className="inv-card-top"><b>{t.orderNumber}</b><span className={`status-chip status-chip--${statusTone(t.status)}`}>{t.isVoided ? 'Voided' : t.status}</span></div>
-                <p className="inv-card-meta">{formatDateTime(t.createdAt)} · {t.customerName}</p>
-                <p className="inv-card-meta">{t.isOnline ? 'Online' : 'Walk-in'} · {t.fulfillment} · {t.itemCount} item{t.itemCount === 1 ? '' : 's'}</p>
-                <p className="inv-card-qty">{money(t.finalTotal)}</p>
-                <p className="inv-card-thresholds">{PAYMENT_METHOD_LABEL[t.paymentMethod] || '—'} · {PAYMENT_STATUS_LABEL[t.paymentStatus] || t.paymentStatus}</p>
-                <div className="inv-card-actions">
-                  <button type="button" className="ops-secondary-action" onClick={() => setDetail(t)}><Eye size={14} /> View Details</button>
-                </div>
-              </article>
-            ))}
+            {transactions.map((transaction) => {
+              const paymentMeta = paymentStatusMeta(transaction)
+              const refundMeta = refundStatusMeta(transaction)
+              return (
+                <article className={`inv-card txn-card txn-row-in ${transaction.isVoided ? 'txn-row-voided' : ''}`} key={transaction.id}>
+                  <div className="inv-card-top">
+                    <div>
+                      <b>{transaction.orderNumber}</b>
+                      <small>{transaction.receiptNumber}</small>
+                    </div>
+                    <span className={`status-chip status-chip--${statusTone(transaction.isVoided ? 'Voided' : transaction.status)}`}>{transaction.isVoided ? 'Voided' : transaction.status}</span>
+                  </div>
+                  <p className="inv-card-meta">{formatDateTime(transaction.createdAt)} - {transaction.customerName}</p>
+                  <p className="inv-card-meta">{getSourceLabel(transaction)} - {transaction.fulfillment} - {transaction.itemCount} item{transaction.itemCount === 1 ? '' : 's'}</p>
+                  <div className="txn-card-badges">
+                    <span className={`status-chip status-chip--${paymentMeta.tone}`}>{paymentMeta.label}</span>
+                    <span className={`status-chip status-chip--${refundMeta.tone}`}>{refundMeta.label}</span>
+                  </div>
+                  <p className="inv-card-qty">{money(transaction.finalTotal)}</p>
+                  <div className="inv-card-actions">
+                    <button type="button" className="ops-secondary-action" onClick={() => openDetails(transaction)}><Eye size={14} /> View Details</button>
+                  </div>
+                </article>
+              )
+            })}
           </div>
 
-          {totalPages > 1 && (
-            <div className="inv-pagination">
-              <button type="button" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
-              <span>Page {page} of {totalPages} · {sorted.length} transactions</span>
-              <button type="button" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>Next</button>
-            </div>
-          )}
+          <div className="inv-pagination txn-pagination">
+            <button type="button" disabled={page === 1} onClick={() => setPage((current) => current - 1)}>Previous</button>
+            <span>Page {page} of {totalPages} - {totalCount} transactions</span>
+            <button type="button" disabled={page === totalPages} onClick={() => setPage((current) => current + 1)}>Next</button>
+          </div>
         </>
       )}
 
-      {detail && (
+      {detailTarget && (
         <TransactionDrawer
-          transaction={transactions.find((t) => t.id === detail.id) || detail}
-          onClose={() => setDetail(null)}
-          onRequestRefund={() => setRefundTarget(detail)}
-          onProcessRefund={(refund, approve) => runProcessRefund(refund, approve)}
-          onVoid={() => setVoidTarget(detail)}
-          onCorrectPayment={() => setCorrectionTarget(detail)}
+          transactionId={detailTarget.id}
+          initialTransaction={detailTarget}
+          canManageFinancialActions={canManageFinancialActions}
           busyId={busyId}
+          onClose={() => setDetailTarget(null)}
+          onViewReceipt={viewReceipt}
+          onPrintReceipt={printReceipt}
+          onDownloadReceipt={downloadReceipt}
+          onViewProof={viewPaymentProof}
+          onRequestRefund={(transaction) => setRefundTarget(transaction)}
+          onProcessRefund={runProcessRefund}
+          onVoid={(transaction) => setVoidTarget(transaction)}
+          onCorrectPayment={(transaction) => setCorrectionTarget(transaction)}
         />
       )}
       {refundTarget && (
@@ -396,9 +919,13 @@ export default function TransactionsPage() {
       )}
       {voidTarget && (
         <ReasonConfirmModal
-          title="Void Transaction" kicker="Void" busy={busyId === voidTarget.id}
-          description={`Voiding ${voidTarget.orderNumber} marks this recorded transaction as invalid. It stays in history for audit purposes but is excluded from sales totals.`}
-          confirmLabel="Void Transaction" onClose={() => setVoidTarget(null)} onConfirm={runVoid}
+          title="Void Transaction"
+          kicker="Void"
+          busy={busyId === voidTarget.id}
+          description={`Voiding ${voidTarget.orderNumber} invalidates the recorded transaction for audit purposes. It stays visible in history but is excluded from settled sales.`}
+          confirmLabel="Void Transaction"
+          onClose={() => setVoidTarget(null)}
+          onConfirm={runVoid}
         />
       )}
       {correctionTarget && (
@@ -406,126 +933,247 @@ export default function TransactionsPage() {
       )}
 
       <div className="ops-toasts" role="status" aria-live="polite">
-        {toasts.map((t) => <div className={`ops-toast ops-toast-${t.type}`} key={t.id}>{t.type === 'success' ? <Check size={15} /> : <AlertTriangle size={15} />} {t.message}</div>)}
+        {toasts.map((toast) => (
+          <div className={`ops-toast ops-toast-${toast.type}`} key={toast.id}>
+            {toast.type === 'success' ? <Check size={15} /> : <AlertTriangle size={15} />} {toast.message}
+          </div>
+        ))}
       </div>
     </AppShell>
   )
 }
 
-function TransactionDrawer({ transaction: t, onClose, onRequestRefund, onProcessRefund, onVoid, onCorrectPayment, busyId }) {
+function RowActionsMenu({
+  transaction, open, onToggle, canManageFinancialActions, onViewDetails, onViewReceipt,
+  onPrintReceipt, onDownloadReceipt, onViewProof, onViewRelatedOrder, onRequestRefund, onProcessRefund, onVoid,
+}) {
+  const canRefund = canManageFinancialActions && paymentStatusMeta(transaction).key === 'paid' && processedRefundAmount(transaction) < transaction.finalTotal && !transaction.isVoided
+  const hasPendingRefund = Boolean(pendingRefund(transaction)) && canManageFinancialActions
+  return (
+    <div className="inv-overflow">
+      <button type="button" className="ops-icon-button small" aria-label={`Actions for ${transaction.orderNumber}`} aria-expanded={open} onClick={onToggle}><MoreVertical size={15} /></button>
+      {open && (
+        <div className="inv-overflow-menu" role="menu">
+          <button type="button" role="menuitem" onClick={onViewDetails}><Eye size={14} /> View Details</button>
+          <button type="button" role="menuitem" onClick={onViewReceipt}><ReceiptText size={14} /> View Receipt</button>
+          <button type="button" role="menuitem" onClick={onPrintReceipt}><Printer size={14} /> Print Receipt</button>
+          <button type="button" role="menuitem" onClick={onDownloadReceipt}><Download size={14} /> Download Receipt</button>
+          {transaction.paymentProofPath && <button type="button" role="menuitem" onClick={onViewProof}><ExternalLink size={14} /> View Payment Proof</button>}
+          {transaction.isOnline && <button type="button" role="menuitem" onClick={onViewRelatedOrder}><ShoppingBag size={14} /> View Related Order</button>}
+          {hasPendingRefund && <button type="button" role="menuitem" onClick={onProcessRefund}><Undo2 size={14} /> Process Refund</button>}
+          {canRefund && <button type="button" role="menuitem" onClick={onRequestRefund}><RotateCcw size={14} /> Request Refund</button>}
+          {canManageFinancialActions && !transaction.isVoided && <button type="button" role="menuitem" className="danger" onClick={onVoid}><Ban size={14} /> Void Transaction</button>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TransactionDrawer({
+  transactionId, initialTransaction, canManageFinancialActions, busyId, onClose, onViewReceipt,
+  onPrintReceipt, onDownloadReceipt, onViewProof, onRequestRefund, onProcessRefund, onVoid, onCorrectPayment,
+}) {
+  const [transaction, setTransaction] = useState(initialTransaction)
   const [audit, setAudit] = useState([])
   const [proofUrl, setProofUrl] = useState('')
-  const [loadingExtra, setLoadingExtra] = useState(true)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let active = true
-    setLoadingExtra(true)
+    setLoading(true)
     Promise.all([
-      fetchTransactionAudit(t.id),
-      t.paymentProofPath ? getPaymentProofUrl(t.paymentProofPath) : Promise.resolve(''),
-    ]).then(([a, url]) => { if (active) { setAudit(a); setProofUrl(url) } })
-      .catch(() => {})
-      .finally(() => { if (active) setLoadingExtra(false) })
+      fetchTransactionById(transactionId),
+      fetchTransactionAudit(transactionId),
+    ]).then(async ([freshTransaction, auditRows]) => {
+      if (!active) return
+      setTransaction(freshTransaction || initialTransaction)
+      setAudit(auditRows)
+      if (freshTransaction?.paymentProofPath) {
+        try {
+          const signedUrl = await getPaymentProofUrl(freshTransaction.paymentProofPath)
+          if (active) setProofUrl(signedUrl || '')
+        } catch {
+          if (active) setProofUrl('')
+        }
+      } else {
+        setProofUrl('')
+      }
+    }).finally(() => {
+      if (active) setLoading(false)
+    })
     return () => { active = false }
-  }, [t.id, t.paymentProofPath, t.updatedAt])
+  }, [transactionId, initialTransaction])
 
-  const remainingRefundable = t.finalTotal - t.refunds.filter((r) => r.status !== 'rejected').reduce((s, r) => s + r.amount, 0)
-  const canManage = t.status !== 'Cancelled' || t.refunds.length > 0
+  if (!transaction) return null
+
+  const refundMeta = refundStatusMeta(transaction)
+  const paymentMeta = paymentStatusMeta(transaction)
+  const canRefund = canManageFinancialActions && paymentMeta.key === 'paid' && processedRefundAmount(transaction) < transaction.finalTotal && !transaction.isVoided
+  const timeline = buildTimeline(transaction, audit)
 
   return (
-    <div className="ops-drawer-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+    <div className="ops-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <aside className="ops-drawer txn-drawer" role="dialog" aria-modal="true" aria-labelledby="txn-drawer-title">
         <header>
-          <div><span className="settings-kicker">{t.receiptNumber}</span><h2 id="txn-drawer-title">{t.orderNumber}</h2></div>
+          <div>
+            <span className="settings-kicker">{transaction.receiptNumber}</span>
+            <h2 id="txn-drawer-title">{transaction.orderNumber}</h2>
+          </div>
           <button type="button" onClick={onClose} aria-label="Close transaction details"><X size={20} /></button>
         </header>
+
         <div className="ops-drawer-body">
-          <section>
+          <section className="txn-detail-overview">
             <h3>Overview</h3>
-            <p><span className={`status-chip status-chip--${statusTone(t.status)}`}>{t.isVoided ? 'Voided' : t.status}</span> <span className={`status-chip status-chip--${t.paymentStatus === 'paid' ? 'completed' : 'attention'}`}>{PAYMENT_STATUS_LABEL[t.paymentStatus]}</span> {t.refundStatus !== 'not_applicable' && <span className={`status-chip status-chip--${t.refundStatus === 'processed' ? 'completed' : t.refundStatus === 'rejected' ? 'cancelled' : 'attention'}`}>{REFUND_STATUS_LABEL[t.refundStatus]}</span>}</p>
-            <p>{formatDateTime(t.createdAt)} · {t.isOnline ? 'Online order' : 'Walk-in / Cashier'} · {t.fulfillment}</p>
-            {t.isVoided && <p className="menu-badge-warning"><AlertTriangle size={13} /> Voided — {t.voidedReason}</p>}
-            {t.status === 'Cancelled' && <p className="menu-badge-warning"><AlertTriangle size={13} /> Cancelled by {t.cancelledByRole} — {t.cancellationReason}{t.cancellationNotes ? ` (${t.cancellationNotes})` : ''}</p>}
+            <div className="txn-pill-row">
+              <span className={`status-chip status-chip--${statusTone(transaction.isVoided ? 'Voided' : transaction.status)}`}>{transaction.isVoided ? 'Voided' : transaction.status}</span>
+              <span className={`status-chip status-chip--${paymentMeta.tone}`}>{paymentMeta.label}</span>
+              <span className={`status-chip status-chip--${refundMeta.tone}`}>{refundMeta.label}</span>
+            </div>
+            <div className="txn-detail-grid">
+              <div><span>Receipt number</span><b>{transaction.receiptNumber}</b></div>
+              <div><span>Payment reference</span><b>{transaction.paymentReference || 'N/A'}</b></div>
+              <div><span>Order source</span><b>{getSourceLabel(transaction)}</b></div>
+              <div><span>Fulfillment</span><b>{transaction.fulfillment}</b></div>
+              <div><span>Created</span><b>{formatDateTime(transaction.createdAt)}</b></div>
+              <div><span>Staff / cashier</span><b>{transaction.cashierName || '-'}</b></div>
+            </div>
+            {transaction.isVoided && <p className="menu-badge-warning"><AlertTriangle size={13} /> Voided because: {transaction.voidedReason}</p>}
+            {transaction.status === 'Cancelled' && <p className="menu-badge-warning"><AlertTriangle size={13} /> Cancelled by {transaction.cancelledByRole || 'Staff'} - {transaction.cancellationReason}{transaction.cancellationNotes ? ` (${transaction.cancellationNotes})` : ''}</p>}
           </section>
+
           <section>
             <h3>Customer</h3>
-            <p>{t.customerName}</p>
-            {t.customerEmail && <p>{t.customerEmail}</p>}
-            {t.customerPhone && <p>{t.customerPhone}</p>}
-            {t.deliveryAddress && <p>Deliver to: {t.deliveryAddress}</p>}
-            {t.cashierName && <p>Cashier: {t.cashierName}</p>}
+            <div className="txn-detail-grid">
+              <div><span>Name</span><b>{transaction.customerName}</b></div>
+              <div><span>Customer type</span><b>{transaction.isGuest ? 'Guest' : 'Registered'}</b></div>
+              {transaction.customerEmail && <div><span>Email</span><b>{transaction.customerEmail}</b></div>}
+              {transaction.customerPhone && <div><span>Phone</span><b>{transaction.customerPhone}</b></div>}
+              {transaction.deliveryAddress && <div className="wide"><span>Delivery address</span><b>{transaction.deliveryAddress}</b></div>}
+              {transaction.scheduleDate && <div><span>Scheduled date</span><b>{formatDateInput(transaction.scheduleDate)}</b></div>}
+              {transaction.scheduleTime && <div><span>Scheduled time</span><b>{formatTime(transaction.scheduleTime)}</b></div>}
+            </div>
           </section>
+
           <section>
             <h3>Items</h3>
             <ul className="txn-item-list">
-              {t.items.map((i) => (
-                <li key={i.id}>
-                  <div><b>{i.quantity}× {i.name}</b><span>{money(i.lineTotal)}</span></div>
-                  {i.addons?.length > 0 && <small>Add-ons: {i.addons.map((a) => a.name || a).join(', ')}</small>}
-                  {i.customizations && Object.keys(i.customizations).length > 0 && <small>{Object.entries(i.customizations).map(([k, v]) => `${k}: ${v}`).join(' · ')}</small>}
+              {transaction.items.map((item) => (
+                <li key={item.id}>
+                  <div><b>{item.quantity}x {item.name}</b><span>{money(item.lineTotal)}</span></div>
+                  <small>Original unit price: {money(item.unitPrice)}</small>
+                  {item.addons?.length > 0 && <small>Add-ons: {item.addons.map((addon) => typeof addon === 'string' ? addon : addon?.name || 'Add-on').join(', ')}</small>}
+                  {item.customizations && Object.keys(item.customizations).length > 0 && <small>{Object.entries(item.customizations).map(([key, value]) => `${startCase(key)}: ${value}`).join(' - ')}</small>}
                 </li>
               ))}
             </ul>
           </section>
+
           <section>
-            <h3>Payment</h3>
-            <p>Subtotal: {money(t.subtotal)}</p>
-            {t.discountAmount > 0 && <p>Discount ({t.discountType}): -{money(t.discountAmount)}</p>}
-            {t.deliveryFee > 0 && <p>Delivery fee: {money(t.deliveryFee)}</p>}
-            <p><b>Total: {money(t.finalTotal)}</b></p>
-            <p>Method: {PAYMENT_METHOD_LABEL[t.paymentMethod] || '—'}</p>
-            {t.paymentMethod === 'cash' && t.amountReceived !== null && <><p>Amount tendered: {money(t.amountReceived)}</p><p>Change: {money(t.changeAmount)}</p></>}
-            {t.paymentReference && <p>Reference #: {t.paymentReference}</p>}
-            {t.bankName && <p>Bank: {t.bankName}</p>}
-            {proofUrl && <p><a href={proofUrl} target="_blank" rel="noreferrer" className="text-button">View payment proof <ExternalLink size={12} /></a></p>}
+            <h3>Payment & totals</h3>
+            <div className="txn-detail-grid">
+              <div><span>Subtotal</span><b>{money(transaction.subtotal)}</b></div>
+              <div><span>Discounts</span><b>{transaction.discountAmount > 0 ? `- ${money(transaction.discountAmount)}` : 'None'}</b></div>
+              <div><span>Delivery fee</span><b>{transaction.deliveryFee > 0 ? money(transaction.deliveryFee) : 'None'}</b></div>
+              <div><span>Total</span><b>{money(transaction.finalTotal)}</b></div>
+              <div><span>Payment method</span><b>{PAYMENT_METHOD_LABEL[transaction.paymentMethod] || '-'}</b></div>
+              <div><span>Payment status</span><b>{paymentMeta.label}</b></div>
+              {transaction.paymentReference && <div><span>Payment reference</span><b>{transaction.paymentReference}</b></div>}
+              {transaction.bankName && <div><span>Bank</span><b>{transaction.bankName}</b></div>}
+              {transaction.amountReceived != null && <div><span>Amount tendered</span><b>{money(transaction.amountReceived)}</b></div>}
+              {transaction.changeAmount != null && <div><span>Change</span><b>{money(transaction.changeAmount)}</b></div>}
+            </div>
+            {proofUrl && (
+              <div className="txn-proof-card">
+                <img src={proofUrl} alt="Payment proof" className="ops-proof-image" />
+                <button type="button" className="secondary-button" onClick={() => onViewProof(transaction)}><ExternalLink size={14} /> Open Payment Proof</button>
+              </div>
+            )}
           </section>
-          {t.refunds.length > 0 && (
+
+          {transaction.refunds.length > 0 && (
             <section>
-              <h3>Refunds</h3>
-              {t.refunds.map((r) => (
-                <div key={r.id} className="txn-refund-row">
-                  <p><b>{money(r.amount)}</b> — {r.reason} <span className={`status-chip status-chip--${r.status === 'processed' ? 'completed' : r.status === 'rejected' ? 'cancelled' : 'attention'}`}>{r.status}</span></p>
-                  <small>Requested {formatDateTime(r.requestedAt)}{r.processedAt ? ` · Processed ${formatDateTime(r.processedAt)}` : ''}{r.referenceNumber ? ` · Ref: ${r.referenceNumber}` : ''}</small>
-                  {r.status === 'pending' && (
+              <h3>Refund & void details</h3>
+              {transaction.refunds.map((refund) => (
+                <div key={refund.id} className="txn-refund-row">
+                  <p><b>{money(refund.amount)}</b> - {refund.reason} <span className={`status-chip status-chip--${refund.status === 'processed' ? 'completed' : refund.status === 'rejected' ? 'cancelled' : 'attention'}`}>{startCase(refund.status)}</span></p>
+                  <small>Requested {formatDateTime(refund.requestedAt)}{refund.processedAt ? ` - Resolved ${formatDateTime(refund.processedAt)}` : ''}{refund.referenceNumber ? ` - Ref ${refund.referenceNumber}` : ''}</small>
+                  {refund.status === 'pending' && canManageFinancialActions && (
                     <div className="txn-refund-actions">
-                      <button type="button" className="ops-secondary-action compact" disabled={busyId === t.id} onClick={() => onProcessRefund(r, true)}>Mark Processed</button>
-                      <button type="button" className="ops-destructive-action compact" disabled={busyId === t.id} onClick={() => onProcessRefund(r, false)}>Reject</button>
+                      <button type="button" className="ops-secondary-action compact" disabled={busyId === refund.id} onClick={() => onProcessRefund(refund, true)}>Mark Processed</button>
+                      <button type="button" className="ops-destructive-action compact" disabled={busyId === refund.id} onClick={() => onProcessRefund(refund, false)}>Reject</button>
                     </div>
                   )}
                 </div>
               ))}
             </section>
           )}
+
+          <section>
+            <h3>Order timeline</h3>
+            <ul className="txn-timeline">
+              {timeline.map((event) => (
+                <li key={`${event.label}-${event.time || 'pending'}`}>
+                  <span>{event.icon}</span>
+                  <div>
+                    <b>{event.label}</b>
+                    <small>{event.time ? formatDateTime(event.time) : 'Waiting for update'}</small>
+                    {event.detail && <p>{event.detail}</p>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+
           <section>
             <h3>Audit history</h3>
-            {loadingExtra ? <p className="ops-proof-pending">Loading…</p> : audit.length === 0 ? <p className="ops-proof-pending">No audited actions on this transaction.</p> : (
+            {loading ? <p className="ops-proof-pending">Loading transaction history...</p> : audit.length === 0 ? <p className="ops-proof-pending">No audited actions recorded yet.</p> : (
               <ul className="inv-movement-list">
-                {audit.map((a) => (
-                  <li key={a.id}><span className={`inv-movement-type ${a.action}`}>{a.action.replace(/_/g, ' ')}</span><b>{a.reason || '—'}</b><span className="inv-movement-meta">{a.staffName} · {formatDateTime(a.created_at)}</span></li>
+                {audit.map((entry) => (
+                  <li key={entry.id}>
+                    <span className={`inv-movement-type ${entry.action}`}>{entry.action.replace(/_/g, ' ')}</span>
+                    <b>{entry.reason || 'No reason recorded'}</b>
+                    <span className="inv-movement-meta">{entry.staffName} - {formatDateTime(entry.created_at)}</span>
+                    {(entry.previous_value || entry.new_value) && <small className="txn-audit-json">Previous: {JSON.stringify(entry.previous_value || {})} | New: {JSON.stringify(entry.new_value || {})}</small>}
+                  </li>
                 ))}
               </ul>
             )}
           </section>
         </div>
+
         <footer className="ops-drawer-footer txn-drawer-footer">
-          <button type="button" className="ops-secondary-action" onClick={() => window.print()}><ReceiptText size={16} /> Print Receipt</button>
-          {t.paymentStatus === 'paid' && remainingRefundable > 0 && !t.isVoided && (
-            <button type="button" className="ops-secondary-action" onClick={onRequestRefund}><RotateCcw size={16} /> Request Refund</button>
-          )}
-          {t.paymentStatus !== 'paid' && (
-            <button type="button" className="ops-secondary-action" onClick={onCorrectPayment}><Settings2 size={16} /> Correct Payment</button>
-          )}
-          {!t.isVoided && (
-            <button type="button" className="ops-destructive-action" onClick={onVoid}><Ban size={16} /> Void</button>
-          )}
+          <button type="button" className="ops-secondary-action" onClick={() => onViewReceipt(transaction)}><Eye size={16} /> View Receipt</button>
+          <button type="button" className="ops-secondary-action" onClick={() => onPrintReceipt(transaction)}><Printer size={16} /> Print</button>
+          <button type="button" className="ops-secondary-action" onClick={() => onDownloadReceipt(transaction)}><Download size={16} /> Download</button>
+          {canRefund && <button type="button" className="ops-secondary-action" onClick={() => onRequestRefund(transaction)}><RotateCcw size={16} /> Request Refund</button>}
+          {canManageFinancialActions && paymentMeta.key !== 'paid' && !transaction.isVoided && <button type="button" className="ops-secondary-action" onClick={() => onCorrectPayment(transaction)}><Settings2 size={16} /> Correct Payment</button>}
+          {canManageFinancialActions && !transaction.isVoided && <button type="button" className="ops-destructive-action" onClick={() => onVoid(transaction)}><Ban size={16} /> Void</button>}
         </footer>
       </aside>
     </div>
   )
 }
 
+function buildTimeline(transaction, audit) {
+  const items = [
+    { label: 'Order recorded', time: transaction.createdAt, icon: <ReceiptText size={14} /> },
+  ]
+  if (transaction.paymentConfirmed) items.push({ label: 'Payment confirmed', time: transaction.updatedAt, icon: <Check size={14} />, detail: paymentStatusMeta(transaction).label })
+  if (transaction.status === 'Preparing') items.push({ label: 'Preparing', time: transaction.updatedAt, icon: <Clock3 size={14} /> })
+  if (transaction.status === 'Ready for Pickup') items.push({ label: 'Ready for pickup', time: transaction.updatedAt, icon: <ShoppingBag size={14} /> })
+  if (transaction.status === 'Out for Delivery') items.push({ label: 'Out for delivery', time: transaction.updatedAt, icon: <ShoppingBag size={14} /> })
+  if (transaction.status === 'Completed') items.push({ label: 'Completed', time: transaction.updatedAt, icon: <Check size={14} /> })
+  if (transaction.cancelledAt) items.push({ label: 'Cancelled', time: transaction.cancelledAt, icon: <Ban size={14} />, detail: transaction.cancellationReason })
+  if (transaction.voidedAt) items.push({ label: 'Voided', time: transaction.voidedAt, icon: <Ban size={14} />, detail: transaction.voidedReason })
+  audit.filter((entry) => entry.action.startsWith('refund_')).forEach((entry) => {
+    items.push({ label: startCase(entry.action), time: entry.created_at, icon: <Undo2 size={14} />, detail: entry.reason || '' })
+  })
+  return items.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0))
+}
+
 function RefundModal({ transaction, busy, onClose, onSubmit }) {
-  const remaining = transaction.finalTotal - transaction.refunds.filter((r) => r.status !== 'rejected').reduce((s, r) => s + r.amount, 0)
+  const remaining = transaction.finalTotal - processedRefundAmount(transaction) - transaction.refunds.filter((refund) => refund.status === 'pending').reduce((sum, refund) => sum + refund.amount, 0)
   const [amount, setAmount] = useState(remaining.toFixed(2))
   const [reason, setReason] = useState('')
   const [method, setMethod] = useState(transaction.paymentMethod || 'manual')
@@ -535,34 +1183,37 @@ function RefundModal({ transaction, busy, onClose, onSubmit }) {
     event.preventDefault()
     const numeric = Number(amount)
     if (Number.isNaN(numeric) || numeric <= 0) return setError('Enter a refund amount greater than zero.')
-    if (numeric > remaining) return setError(`Refund amount cannot exceed the remaining balance of ${money(remaining)}.`)
+    if (numeric > remaining) return setError(`Refund amount cannot exceed the remaining refundable balance of ${money(remaining)}.`)
     if (!reason.trim()) return setError('A refund reason is required.')
     setError('')
     onSubmit({ amount: numeric, reason, method })
   }
 
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
+    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
       <section className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="refund-title">
-        <button className="payment-modal-close" type="button" onClick={onClose} disabled={busy} aria-label="Close">×</button>
+        <button className="payment-modal-close" type="button" onClick={onClose} disabled={busy} aria-label="Close">x</button>
         <span className="payment-modal-kicker">Refund</span>
         <h2 id="refund-title">Request refund for {transaction.orderNumber}</h2>
         <p>Remaining refundable balance: <b>{money(remaining)}</b></p>
-        <p className="ops-proof-pending">GCash and Bank Transfer refunds are not processed automatically — this records the refund as pending until staff confirm the money was actually sent back.</p>
+        <p className="ops-proof-pending">Digital refunds stay pending until a staff member confirms the transfer or payout actually happened.</p>
         <form onSubmit={submit}>
           <div className="form-grid">
-            <label className="field"><span>Refund amount</span><input type="number" min="0" max={remaining} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required /></label>
+            <label className="field"><span>Refund amount</span><input type="number" min="0" max={remaining} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label>
             <label className="field"><span>Refund method</span>
-              <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option value="cash">Cash</option><option value="gcash">GCash</option><option value="bank_transfer">Bank Transfer</option><option value="manual">Other / Manual</option>
+              <select value={method} onChange={(event) => setMethod(event.target.value)}>
+                <option value="cash">Cash</option>
+                <option value="gcash">GCash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="manual">Other / Manual</option>
               </select>
             </label>
           </div>
-          <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Item unavailable, order error…" required /></label>
+          <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why this refund is needed." required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
-            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Request Refund'}</button>
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Submitting...' : 'Request Refund'}</button>
           </div>
         </form>
       </section>
@@ -573,24 +1224,26 @@ function RefundModal({ transaction, busy, onClose, onSubmit }) {
 function ReasonConfirmModal({ title, kicker, description, confirmLabel, busy, onClose, onConfirm }) {
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
+
   const submit = (event) => {
     event.preventDefault()
     if (!reason.trim()) return setError('A reason is required.')
     setError('')
     onConfirm(reason)
   }
+
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
+    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
       <section className="payment-modal" role="alertdialog" aria-modal="true" aria-labelledby="reason-confirm-title">
         <span className="payment-modal-kicker">{kicker}</span>
         <h2 id="reason-confirm-title">{title}</h2>
         <p>{description}</p>
         <form onSubmit={submit}>
-          <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(e) => setReason(e.target.value)} required /></label>
+          <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
-            <button className="danger-button" type="submit" disabled={busy}>{busy ? 'Saving…' : confirmLabel}</button>
+            <button className="danger-button" type="submit" disabled={busy}>{busy ? 'Saving...' : confirmLabel}</button>
           </div>
         </form>
       </section>
@@ -602,29 +1255,32 @@ function PaymentCorrectionModal({ transaction, busy, onClose, onSubmit }) {
   const [newStatus, setNewStatus] = useState(transaction.paymentStatus === 'paid' ? 'pending' : 'paid')
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
+
   const submit = (event) => {
     event.preventDefault()
     if (!reason.trim()) return setError('A reason is required for this correction.')
     setError('')
     onSubmit(newStatus, reason)
   }
+
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
+    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
       <section className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="correction-title">
-        <button className="payment-modal-close" type="button" onClick={onClose} disabled={busy} aria-label="Close">×</button>
+        <button className="payment-modal-close" type="button" onClick={onClose} disabled={busy} aria-label="Close">x</button>
         <span className="payment-modal-kicker">Payment correction</span>
         <h2 id="correction-title">Correct payment status for {transaction.orderNumber}</h2>
         <form onSubmit={submit}>
           <label className="field"><span>New payment status</span>
-            <select value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
-              <option value="paid">Paid</option><option value="pending">Pending</option>
+            <select value={newStatus} onChange={(event) => setNewStatus(event.target.value)}>
+              <option value="paid">Paid</option>
+              <option value="pending">Pending</option>
             </select>
           </label>
-          <label className="field"><span>Reason for correction</span><textarea rows="3" value={reason} onChange={(e) => setReason(e.target.value)} required /></label>
+          <label className="field"><span>Reason for correction</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
-            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save Correction'}</button>
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Save Correction'}</button>
           </div>
         </form>
       </section>
