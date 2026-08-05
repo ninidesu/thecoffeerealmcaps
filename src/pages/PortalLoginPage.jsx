@@ -2,6 +2,7 @@ import { ArrowRight, ChevronDown, Coffee, Eye, EyeOff, KeyRound, Lock, ShieldChe
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { roleRoutes, signInPortal } from '../lib/auth'
+import { queueAuthWelcome } from '../lib/authFeedback'
 
 export default function PortalLoginPage() {
   const [role, setRole] = useState('admin')
@@ -22,6 +23,7 @@ export default function PortalLoginPage() {
     try {
       const { profile } = await signInPortal({ email, password, role })
       const target = location.state?.from || roleRoutes[String(profile.role || role).toLowerCase()] || roleRoutes[role] || '/portal'
+      queueAuthWelcome(profile)
       navigate(target, { replace: true })
     } catch (error) {
       setMessage(error.message || 'Unable to sign in. Please check the account and role.')
