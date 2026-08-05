@@ -108,31 +108,23 @@ function variantOptionsFromConfig(config, product) {
   })).filter((option) => option.label && option.price > 0)
 }
 
+function isMeal(product) {
+  const itemType = String(product.itemType || '').toLowerCase()
+  const category = String(product.category || '').toLowerCase()
+  return itemType === 'meal' || /\bmeals?\b/.test(category)
+}
+
 function productOptionDefaults(product) {
   const variantConfig = parseVariantConfig(product.variantConfig)
   const variantOptions = variantOptionsFromConfig(variantConfig, product)
-  const text = `${product.itemType || ''} ${product.category || ''} ${product.name || ''}`.toLowerCase()
-  const temperatureType = normalizeTemperatureType(product.temperatureType)
-  const isFood = /meal|meals|pasta|rice|sandwich|snack|nachos|cake|cookie|cookies|cheesecake|tiramisu/.test(text)
-  const isDrink = !isFood && (/drink|drinks|coffee|tea|latte|frappe|americano|espresso|milk|mocha|cappuccino|macchiato|smoothie|juice|chocolate/.test(text) || ['drink', 'drinks', 'beverage'].includes(String(product.itemType || '').toLowerCase()))
-  const inferredTemperature = temperatureType || (isDrink ? (/iced|cold|frappe|smoothie|juice/.test(text) ? 'cold' : 'both') : '')
-
-  if (variantOptions.length) {
-    return {
-      allowSugar: false,
-      allowIce: false,
-      allowAddons: truthy(product.allowAddons) || isFood,
-      temperatureType: '',
-      variantConfig,
-      variantOptions,
-    }
-  }
 
   return {
-    allowSugar: truthy(product.allowSugar) || isDrink,
-    allowIce: truthy(product.allowIce) || ['cold', 'both'].includes(inferredTemperature),
-    allowAddons: truthy(product.allowAddons) || isDrink || isFood,
-    temperatureType: inferredTemperature,
+    // Menu settings are authoritative. A POS must never infer options from an
+    // item's name, category, or type: many drinks and foods are fixed items.
+    allowSugar: truthy(product.allowSugar),
+    allowIce: truthy(product.allowIce),
+    allowAddons: truthy(product.allowAddons) && !isMeal(product),
+    temperatureType: normalizeTemperatureType(product.temperatureType),
     variantConfig,
     variantOptions,
   }
@@ -236,27 +228,28 @@ export default function CashierPage() {
         supabase.from('orders').select('id,order_number,customer_name,subtotal,discount_amount,final_total,payment_status,payment_confirmed,discount_type,discount_customer_name,discount_id_number,created_at,order_items(*),payments(*)').eq('order_type', 'walk-in').order('created_at', { ascending: false }).limit(30),
       ])
       if (ignore) return
-      if (!productResult.error && productResult.data?.length) {
-        setProducts(productResult.data.map(normalizeProduct))
-        setNotice('')
+      if (!productResult.error) {
+        const liveProducts = (productResult.data || []).map(normalizeProduct)
+        setProducts(liveProducts)
+        setNotice(liveProducts.length ? '' : 'No active menu items are currently available in the POS.')
       } else {
         setProducts(fallbackProducts)
-        setNotice(productResult.error ? `Using local menu because Supabase menu_items could not load: ${productResult.error.message}` : 'No Supabase menu items found yet, showing local menu.')
+        setNotice(`Using local menu because Supabase menu_items could not load: ${productResult.error.message}`)
       }
       if (!orderResult.error && orderResult.data) setTransactions(orderResult.data.map(normalizeOrder))
       setLoading(false)
     }
     loadCashierData()
-    async function toggleFullscreen() {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen()
-      else await document.documentElement.requestFullscreen()
-    } catch {
-      setError('Fullscreen is not available in this browser.')
-    }
-  }
-  return () => {
+    const menuChannel = isSupabaseConfigured
+      ? supabase.channel('cashier-live-menu')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => loadCashierData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'main_categories' }, () => loadCashierData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'subcategories' }, () => loadCashierData())
+        .subscribe()
+      : null
+    return () => {
       ignore = true
+      if (menuChannel) supabase.removeChannel(menuChannel)
     }
   }, [fallbackProducts])
 
@@ -339,7 +332,13 @@ export default function CashierPage() {
   }
 
   function shouldCustomize(product) {
-    return true
+    return Boolean(
+      product.variantOptions?.length ||
+      product.temperatureType ||
+      product.allowSugar ||
+      product.allowIce ||
+      product.allowAddons,
+    )
   }
 
   function addConfiguredItem(product, customizations = {}, addons = [], quantity = 1) {
