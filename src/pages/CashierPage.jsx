@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import LogoutConfirmModal from '../components/auth/LogoutConfirmModal'
 import { menuItems, store } from '../data/mockData'
 import { getCurrentPortalSession, signOutPortal } from '../lib/auth'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
@@ -207,6 +208,8 @@ export default function CashierPage() {
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(Boolean(isSupabaseConfigured))
   const [notice, setNotice] = useState('')
+  const [logoutOpen, setLogoutOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [category, setCategory] = useState('All')
   const [search, setSearch] = useState('')
   const [orderTabs, setOrderTabs] = useState(() => [createOrderTab(1)])
@@ -474,8 +477,15 @@ export default function CashierPage() {
     return true
   }
   async function logout() {
-    await signOutPortal()
-    navigate('/portal', { replace: true })
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await signOutPortal()
+      navigate('/portal', { replace: true })
+    } finally {
+      setLoggingOut(false)
+      setLogoutOpen(false)
+    }
   }
 
   async function toggleFullscreen() {
@@ -507,7 +517,7 @@ export default function CashierPage() {
         </div>
         <nav>
           <button type="button" onClick={() => setShowTransactions(true)}><ReceiptText size={21} /><span>transactions</span></button>
-          <button type="button" onClick={logout}><LogOut size={21} /><span>logout</span></button>
+          <button type="button" onClick={() => setLogoutOpen(true)}><LogOut size={21} /><span>logout</span></button>
         </nav>
       </header>
 
@@ -547,6 +557,7 @@ export default function CashierPage() {
           </div>
         </aside>
       </main>
+      <LogoutConfirmModal open={logoutOpen} busy={loggingOut} onCancel={() => setLogoutOpen(false)} onConfirm={logout} />
 
       {showCheckout ? <CheckoutModal cart={cart} subtotal={subtotal} total={total} discount={discount} setDiscount={setDiscount} payment={payment} setPayment={setPayment} change={change} error={error} onCancel={() => { setShowCheckout(false); setError('') }} onConfirm={async () => { if (await saveOrder()) setShowCheckout(false) }} /> : null}
       {customizingProduct ? <ItemCustomizationModal product={customizingProduct} onClose={() => setCustomizingProduct(null)} onAdd={(customizations, addons, quantity) => { updateConfiguredItem(customizingProduct, customizations, addons, quantity); setCustomizingProduct(null) }} /> : null}

@@ -1,6 +1,7 @@
 import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck, User, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { queueAuthWelcome } from '../lib/authFeedback'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 const otpDigits = 6
@@ -59,9 +60,10 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     const password = String(data.get('password') || '')
     if (!email || !password) return setAuthError('Please enter your email and password.')
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password })
     setLoading(false)
     if (error) return setAuthError(error.message)
+    queueAuthWelcome(authData?.user?.user_metadata)
     navigate(location.state?.from || '/menu')
   }
 
@@ -85,7 +87,10 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     })
     setLoading(false)
     if (error) return setAuthError(error.message || 'Unable to send OTP right now.')
-    if (signupData.session) return navigate(location.state?.from || '/menu')
+    if (signupData.session) {
+      queueAuthWelcome(signupData.user?.user_metadata, username)
+      return navigate(location.state?.from || '/menu')
+    }
     setRegisteredEmail(email)
     setPendingUsername(username)
     setOtpCode(Array(otpDigits).fill(''))
@@ -108,6 +113,7 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     if (error) return setAuthError(error.message || 'Unable to verify OTP right now.')
     setOtpOpen(false)
     setAuthMessage(`Account verified. Welcome, ${pendingUsername || 'customer'}!`)
+    queueAuthWelcome(pendingUsername)
     navigate(location.state?.from || '/menu')
   }
 

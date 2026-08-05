@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, useInView, useReducedMotion } from 'framer-motion'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import CoffeeCard from './CoffeeCard'
 
@@ -10,8 +10,16 @@ const WHEEL_COOLDOWN_MS = 400
 export default function BestSellerCarousel({ items, onAddToCart }) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [isHovering, setIsHovering] = useState(false)
+  const [hasEntered, setHasEntered] = useState(false)
   const wheelLockRef = useRef(false)
   const trackRef = useRef(null)
+  const carouselRef = useRef(null)
+  const prefersReducedMotion = useReducedMotion()
+  const inView = useInView(carouselRef, { once: true, amount: 0.34 })
+
+  useEffect(() => {
+    if (inView) setHasEntered(true)
+  }, [inView])
 
   const goTo = useCallback(
     (index) => {
@@ -61,6 +69,7 @@ export default function BestSellerCarousel({ items, onAddToCart }) {
 
   return (
     <div
+      ref={carouselRef}
       className="coffee-carousel"
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
@@ -83,6 +92,10 @@ export default function BestSellerCarousel({ items, onAddToCart }) {
       <motion.div
         ref={trackRef}
         className="coffee-carousel-track"
+        initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.94, filter: 'blur(8px)', clipPath: 'inset(16% 8% 18% 8% round 32px)' }}
+        whileInView={prefersReducedMotion ? undefined : { opacity: 1, scale: 1, filter: 'blur(0px)', clipPath: 'inset(0% 0% 0% 0% round 32px)' }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.58, ease: [0.22, 1, 0.36, 1] }}
         drag="x"
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.15}
@@ -99,6 +112,7 @@ export default function BestSellerCarousel({ items, onAddToCart }) {
               item={item}
               offset={offset}
               isActive={offset === 0}
+              revealed={hasEntered || prefersReducedMotion}
               onSelect={(cardOffset) => goTo(activeIndex + cardOffset)}
               onAddToCart={onAddToCart}
             />
