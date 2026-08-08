@@ -4236,6 +4236,33 @@
 .cashier-v2 .cashier-order-tab.active .cashier-tab-select { color: #214d36; }
 @media (max-width: 760px) { .cashier-v2 .legacy-pos-menu { margin-top: 30px; } .cashier-v2 .cashier-workspace-tabs { left: 12px; top: -31px; overflow-x: auto; max-width: calc(100% - 24px); } }
 
+/* Responsive order tabs: open tabs share the strip evenly. */
+.cashier-v2 .cashier-workspace-tabs {
+  right: 16px;
+  width: auto;
+}
+.cashier-v2 .cashier-order-tabs-list {
+  width: 100%;
+  min-width: 0;
+}
+.cashier-v2 .cashier-order-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+}
+.cashier-v2 .cashier-order-tab .cashier-tab-select {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+}
+.cashier-v2 .cashier-order-tab .cashier-tab-close {
+  flex: 0 0 30px;
+}
+@media (max-width: 760px) {
+  .cashier-v2 .cashier-workspace-tabs { right: 12px; }
+}
+
 /* Single-line fullscreen control */
 .cashier-v2 .cashier-fullscreen { flex: 0 0 auto; min-width: 154px; white-space: nowrap; border: 1.5px solid #738a79; border-radius: 6px; }
 .cashier-v2 .cashier-fullscreen span { display: inline !important; }
