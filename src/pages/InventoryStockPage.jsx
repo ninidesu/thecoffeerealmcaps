@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, Archive, Bell, Box, Check, MoreVertical,
-  Package, PackageMinus, PackagePlus, PackageX, Pencil, Plus, RefreshCw, Search, X,
+  Minus, Package, PackageMinus, PackagePlus, PackageX, Pencil, Plus, RefreshCw, Search, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
 import { describeError } from '../utils/describeError'
@@ -11,14 +11,15 @@ import {
   upsertIngredient, archiveIngredient, upsertFinishedProduct, archiveFinishedProduct,
   upsertSupply, archiveSupply, adjustStock,
 } from '../services/opsInventoryService'
+import { getCurrentPortalSession } from '../lib/auth'
+import { fetchStaffPreferences, getRememberedStaffFilters, rememberStaffFilters, shouldShowSystemNotification } from '../services/staffSettingsService'
 
 const ENTITY_CONFIGS = {
   ingredient: { key: 'ingredient', label: 'Ingredients', singular: 'Ingredient', fetch: fetchIngredients, upsert: upsertIngredient, archive: archiveIngredient, hasType: true },
-  finished_product: { key: 'finished_product', label: 'Finished Products', singular: 'Finished Product', fetch: fetchFinishedProducts, upsert: upsertFinishedProduct, archive: archiveFinishedProduct, hasType: false, hasMenuLink: true },
+  finished_product: { key: 'finished_product', label: 'Products', singular: 'Product', fetch: fetchFinishedProducts, upsert: upsertFinishedProduct, archive: archiveFinishedProduct, hasType: false, hasMenuLink: true },
   supply: { key: 'supply', label: 'Supplies', singular: 'Supply', fetch: fetchSupplies, upsert: upsertSupply, archive: archiveSupply, hasType: false },
 }
-const TABS = [ENTITY_CONFIGS.ingredient, ENTITY_CONFIGS.finished_product, ENTITY_CONFIGS.supply]
-const PAGE_SIZE = 20
+const PAGE_SIZE = 25
 
 function stockStatus(item) {
   if (item.quantity <= 0) return 'out'
@@ -65,6 +66,8 @@ export default function InventoryStockPage() {
   const [typeFilter, setTypeFilter] = useState('all')
   const [sortBy, setSortBy] = useState('name')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
+  const [filtersReady, setFiltersReady] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState('')
 
   const [formTarget, setFormTarget] = useState(null)
@@ -75,6 +78,33 @@ export default function InventoryStockPage() {
   const config = ENTITY_CONFIGS[activeEntity]
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
+  useEffect(() => {
+    let active = true
+    getCurrentPortalSession().then(async ({ profile }) => {
+      if (!profile?.id) return
+      try {
+        const preferences = await fetchStaffPreferences(profile.id)
+        if (!active) return
+        const remembered = getRememberedStaffFilters('inventory')
+        setActiveEntity(remembered?.activeEntity || preferences.inventory_tab)
+        setStatusFilter(remembered?.statusFilter || preferences.inventory_filter)
+        setPageSize(preferences.rows_per_page)
+        if (remembered) {
+          setSearch(remembered.search || '')
+          setCategoryFilter(remembered.categoryFilter || 'all')
+          setTypeFilter(remembered.typeFilter || 'all')
+          setSortBy(remembered.sortBy || 'name')
+        }
+      } catch { /* Default inventory settings remain available before migration. */ }
+      finally { if (active) setFiltersReady(true) }
+    })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!filtersReady) return
+    rememberStaffFilters('inventory', { activeEntity, search, categoryFilter, statusFilter, typeFilter, sortBy })
+  }, [activeEntity, categoryFilter, filtersReady, search, sortBy, statusFilter, typeFilter])
 
   const load = async (entity = activeEntity) => {
     setLoading(true)
@@ -89,9 +119,10 @@ export default function InventoryStockPage() {
       setLoading(false)
     }
   }
-  useEffect(() => { setSearch(''); setCategoryFilter('all'); setStatusFilter('all'); setTypeFilter('all'); setPage(1); load(activeEntity) }, [activeEntity])
+  useEffect(() => { setPage(1); load(activeEntity) }, [activeEntity])
 
   const pushToast = (type, message) => {
+    if (!shouldShowSystemNotification(type)) return
     const id = crypto.randomUUID()
     setToasts((c) => [...c, { id, type, message }])
     setTimeout(() => setToasts((c) => c.filter((t) => t.id !== id)), 4500)
@@ -118,8 +149,8 @@ export default function InventoryStockPage() {
     return list
   }, [filtered, sortBy])
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
-  const pageItems = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize))
+  const pageItems = sorted.slice((page - 1) * pageSize, page * pageSize)
 
   const outCount = items.filter((i) => stockStatus(i) === 'out').length
   const lowCount = items.filter((i) => stockStatus(i) === 'low').length
@@ -164,7 +195,13 @@ export default function InventoryStockPage() {
   const attentionCount = outCount + lowCount
 
   return (
-    <AppShell role="staff" title="Inventory Stock Overview" eyebrow="Track ingredients, finished products, and supplies in real time." actions={
+    <AppShell role="staff" title="Inventory Stock Overview" titleActions={
+      <div className="ops-order-view-toggle" role="tablist" aria-label="Inventory type">
+        <button type="button" role="tab" aria-selected={activeEntity === 'ingredient'} className={activeEntity === 'ingredient' ? 'active' : ''} onClick={() => setActiveEntity('ingredient')}>Ingredients</button>
+        <button type="button" role="tab" aria-selected={activeEntity === 'finished_product'} className={activeEntity === 'finished_product' ? 'active' : ''} onClick={() => setActiveEntity('finished_product')}>Products</button>
+        <button type="button" role="tab" aria-selected={activeEntity === 'supply'} className={activeEntity === 'supply' ? 'active' : ''} onClick={() => setActiveEntity('supply')}>Supplies</button>
+      </div>
+    } actions={
       <div className="ops-header-actions">
         <div className="ops-clock">
           <span>{new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric' }).format(now)}</span>
@@ -181,16 +218,10 @@ export default function InventoryStockPage() {
     }>
       {error && <p className="form-error">{error}</p>}
 
-      <div className="inv-tabs" role="tablist">
-        {TABS.map((tab) => (
-          <button type="button" key={tab.key} role="tab" aria-selected={activeEntity === tab.key} className={activeEntity === tab.key ? 'active' : ''} onClick={() => setActiveEntity(tab.key)}>{tab.label}</button>
-        ))}
-      </div>
-
-      <div className="inv-summary-row">
-        <div className="inv-summary-card tone-red"><PackageX size={18} /><span>Out of Stock</span><b>{outCount}</b></div>
-        <div className="inv-summary-card tone-amber"><AlertTriangle size={18} /><span>Low Stock</span><b>{lowCount}</b></div>
-        <div className="inv-summary-card tone-neutral"><Package size={18} /><span>Total Records</span><b>{items.length}</b></div>
+      <div className="inv-summary-row inventory-summary-grid">
+        <article className="inv-summary-card tone-red"><span className="inv-summary-icon"><PackageX size={18} /></span><span className="inv-summary-copy"><span>Out of Stock</span><small>Needs replenishment</small></span><b>{outCount}</b></article>
+        <article className="inv-summary-card tone-amber"><span className="inv-summary-icon"><AlertTriangle size={18} /></span><span className="inv-summary-copy"><span>Low Stock</span><small>Below alert level</small></span><b>{lowCount}</b></article>
+        <article className="inv-summary-card tone-neutral"><span className="inv-summary-icon"><Package size={18} /></span><span className="inv-summary-copy"><span>Total Records</span><small>Tracked inventory</small></span><b>{items.length}</b></article>
       </div>
 
       <div className="inv-toolbar">
@@ -324,10 +355,10 @@ function RowActions({ item, busy, menuOpen, onToggleMenu, onView, onAdd, onDeduc
   return (
     <div className="inv-row-actions">
       <button type="button" className="ops-secondary-action compact" onClick={onView}>View</button>
-      <button type="button" className="ops-icon-button small" aria-label={`Add stock for ${item.name}`} title="Add stock" onClick={onAdd} disabled={busy}><PackagePlus size={15} /></button>
-      <button type="button" className="ops-icon-button small" aria-label={`Deduct stock for ${item.name}`} title="Deduct stock" onClick={onDeduct} disabled={busy}><PackageMinus size={15} /></button>
+      <button type="button" className="ops-icon-button small inv-action-add" aria-label={`Add stock for ${item.name}`} title="Add stock" onClick={onAdd} disabled={busy}><Plus size={15} /></button>
+      <button type="button" className="ops-icon-button small inv-action-deduct" aria-label={`Deduct stock for ${item.name}`} title="Deduct stock" onClick={onDeduct} disabled={busy}><Minus size={15} /></button>
       <div className="inv-overflow">
-        <button type="button" className="ops-icon-button small" aria-label={`More actions for ${item.name}`} aria-expanded={menuOpen} onClick={onToggleMenu}><MoreVertical size={15} /></button>
+        <button type="button" className="ops-icon-button small inv-action-more" aria-label={`More actions for ${item.name}`} aria-expanded={menuOpen} onClick={onToggleMenu}><MoreVertical size={15} /></button>
         {menuOpen && (
           <div className="inv-overflow-menu" role="menu">
             <button type="button" role="menuitem" onClick={onEdit}><Pencil size={14} /> Edit item</button>
@@ -343,7 +374,8 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
   const [values, setValues] = useState({
     name: item?.name || '', category: item?.category || '', type: item?.type || 'other', unit: item?.unit || '',
     minStockLevel: item?.minStockLevel ?? 10, highStockLevel: item?.highStockLevel ?? (config.key === 'ingredient' ? 500 : 100),
-    supplier: item?.supplier || '', notes: item?.notes || '', initialQuantity: item ? item.quantity : 0, menuItemId: item?.menuItemId || '',
+    supplier: item?.supplier || '', notes: item?.notes || '', initialQuantity: item ? item.quantity : 0,
+    menuItemId: item?.menuItemId || '', saleMappings: item?.saleMappings || (item?.menuItemId ? [{ menuItemId: item.menuItemId, variantKey: '', unitsPerSale: 1 }] : []),
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -358,13 +390,14 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
     if (Number.isNaN(min) || min < 0) return setError('Low-stock threshold must be zero or greater.')
     if (Number.isNaN(high) || high < 0) return setError('Healthy-stock target must be zero or greater.')
     if (high > 0 && min > high) return setError('The low-stock threshold cannot exceed the healthy-stock target.')
+    if (config.hasMenuLink && values.saleMappings.some((mapping) => !mapping.menuItemId || Number(mapping.unitsPerSale) <= 0)) return setError('Choose a menu item and a positive inventory quantity for every sale format.')
     if (!item) {
       const initial = Number(values.initialQuantity)
       if (Number.isNaN(initial) || initial < 0) return setError('Starting quantity cannot be negative.')
     }
     setSaving(true); setError('')
     try {
-      await onSave({ id: item?.id, ...values, minStockLevel: min, highStockLevel: high, initialQuantity: Number(values.initialQuantity) })
+      await onSave({ id: item?.id, ...values, menuItemId: values.saleMappings[0]?.menuItemId || null, minStockLevel: min, highStockLevel: high, initialQuantity: Number(values.initialQuantity) })
     } catch (cause) {
       setError(describeError(cause, 'Could not save this item.'))
       setSaving(false)
@@ -373,12 +406,11 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
 
   return (
     <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onClose() }}>
-      <section className="payment-modal inv-form-modal" role="dialog" aria-modal="true" aria-labelledby="inv-form-title">
+      <section className="payment-modal inv-form-modal" role="dialog" aria-modal="true" aria-labelledby="inv-form-title" aria-describedby="inv-form-description">
         <button className="payment-modal-close" type="button" onClick={onClose} disabled={saving} aria-label="Close">×</button>
-        <span className="payment-modal-kicker">{item ? `Edit ${config.singular}` : `New ${config.singular}`}</span>
-        <h2 id="inv-form-title">{item ? item.name : `Record a new ${config.singular.toLowerCase()}`}</h2>
-        <form onSubmit={submit}>
-          <div className="form-grid">
+        <header className="inv-form-header"><span className="inv-form-icon"><Package size={20} /></span><div><span>{item ? `Editing ${config.singular.toLowerCase()}` : `New ${config.singular.toLowerCase()}`}</span><h2 id="inv-form-title">{item ? item.name : `Add ${config.singular.toLowerCase()} stock`}</h2><p id="inv-form-description">{config.key === 'finished_product' ? 'Set the stock unit, then define how each menu format uses this product.' : 'Add the item details, stock levels, and replenishment thresholds.'}</p></div></header>
+        <form className="inv-record-form" onSubmit={submit}>
+          <section className="inv-form-section"><header><h3>Item details</h3><p>How this item will appear in inventory.</p></header><div className="form-grid">
             <label className="field"><span>{config.singular} name</span><input value={values.name} onChange={(e) => set('name', e.target.value)} required /></label>
             <label className="field"><span>Category</span><input value={values.category} onChange={(e) => set('category', e.target.value)} placeholder="e.g. Milk, Protein, Syrup" /></label>
             {config.hasType && (
@@ -388,23 +420,33 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
                 </select>
               </label>
             )}
-            {config.hasMenuLink && (
-              <label className="field"><span>Linked menu item (optional)</span>
-                <select value={values.menuItemId} onChange={(e) => set('menuItemId', e.target.value)}>
-                  <option value="">Not linked</option>
-                  {menuItems.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
-              </label>
-            )}
-            <label className="field"><span>Unit</span><input value={values.unit} onChange={(e) => set('unit', e.target.value)} placeholder="kg, L, pcs" required /></label>
+          </div></section>
+          <section className="inv-form-section"><header><h3>Stock levels</h3><p>Use the same unit for the quantity and thresholds.</p></header><div className="form-grid">
+            <label className="field"><span>Unit</span><input value={values.unit} onChange={(e) => set('unit', e.target.value)} placeholder={config.key === 'finished_product' ? 'piece, slice, box' : 'kg, L, pcs'} required /></label>
             {!item && <label className="field"><span>Starting quantity</span><input type="number" min="0" step="any" value={values.initialQuantity} onChange={(e) => set('initialQuantity', e.target.value)} /></label>}
             <label className="field"><span>Low-stock threshold</span><input type="number" min="0" step="any" value={values.minStockLevel} onChange={(e) => set('minStockLevel', e.target.value)} required /></label>
             <label className="field"><span>Healthy-stock target</span><input type="number" min="0" step="any" value={values.highStockLevel} onChange={(e) => set('highStockLevel', e.target.value)} required /></label>
-            <label className="field"><span>Supplier (optional)</span><input value={values.supplier} onChange={(e) => set('supplier', e.target.value)} /></label>
-          </div>
-          <label className="field"><span>Notes (optional)</span><textarea rows="3" value={values.notes} onChange={(e) => set('notes', e.target.value)} /></label>
+          </div></section>
+          {config.hasMenuLink && (
+            <fieldset className="inv-sale-mappings">
+              <legend>How this product is sold</legend>
+              <p>Link each menu format to the number of inventory units it uses. A box of six cookies uses 6 pieces.</p>
+              {values.saleMappings.map((mapping, index) => {
+                const selectedMenuItem = menuItems.find((menuItem) => menuItem.id === mapping.menuItemId)
+                const variants = Object.keys(selectedMenuItem?.variant_options?.prices || {})
+                const updateMapping = (key, value) => set('saleMappings', values.saleMappings.map((entry, entryIndex) => entryIndex === index ? { ...entry, [key]: value } : entry))
+                return <div className="inv-sale-mapping" key={index}>
+                  <select value={mapping.menuItemId} onChange={(e) => updateMapping('menuItemId', e.target.value)} aria-label="Menu item"><option value="">Select menu item</option>{menuItems.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+                  <select value={mapping.variantKey} onChange={(e) => updateMapping('variantKey', e.target.value)} aria-label="Menu variant"><option value="">Default sale</option>{variants.map((variant) => <option key={variant} value={variant}>{variant}</option>)}</select>
+                  <input type="number" min="0.001" step="any" value={mapping.unitsPerSale} onChange={(e) => updateMapping('unitsPerSale', e.target.value)} aria-label="Inventory units per sale" placeholder="Units per sale" />
+                  <button type="button" className="ops-secondary-action compact" onClick={() => set('saleMappings', values.saleMappings.filter((_, entryIndex) => entryIndex !== index))}>Remove</button>
+                </div>
+              })}
+              <button type="button" className="ops-secondary-action compact" onClick={() => set('saleMappings', [...values.saleMappings, { menuItemId: '', variantKey: '', unitsPerSale: 1 }])}>Add sale format</button>
+            </fieldset>
+          )}
           {error && <p className="form-error">{error}</p>}
-          <div className="payment-modal-actions">
+          <div className="payment-modal-actions inv-form-actions">
             <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
             <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
           </div>
