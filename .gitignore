@@ -4,3 +4,7 @@ dist
 .env.local
 *.log
 supabase/.temp/
+
+# local tooling artifacts
+.codex-dev.err
+.claude/settings.local.json

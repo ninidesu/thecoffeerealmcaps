@@ -6,12 +6,14 @@ import CustomerProtectedRoute from './routes/CustomerProtectedRoute'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminInventoryPage from './pages/AdminInventoryPage'
 import CashierPage from './pages/CashierPage'
+import CancellationReportPage from './pages/CancellationReportPage'
 import CustomerLoginPage from './pages/CustomerLoginPage'
 import HomePage from './pages/HomePage'
 import InventoryStockPage from './pages/InventoryStockPage'
 import ManageMenuPage from './pages/ManageMenuPage'
 import OrderPreparationPage from './pages/OrderPreparationPage'
 import PortalLoginPage from './pages/PortalLoginPage'
+import SalesReportPage from './pages/SalesReportPage'
 import StaffDashboard from './pages/StaffDashboard'
 import TransactionsPage from './pages/TransactionsPage'
 import {
@@ -72,6 +74,14 @@ export default function App() {
         <Route
           path="/admin/transactions"
           element={<ProtectedRoute allowedRoles={['admin']}><TransactionsPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/admin/reports"
+          element={<ProtectedRoute allowedRoles={['admin']}><SalesReportPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/admin/cancellations"
+          element={<ProtectedRoute allowedRoles={['admin']}><CancellationReportPage /></ProtectedRoute>}
         />
         <Route
           path="/admin/*"
