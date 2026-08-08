@@ -42,6 +42,7 @@ const lineUnitPrice = (item) => baseUnitPrice(item) + addonTotal(item.addons)
 const itemLineTotal = (item) => lineUnitPrice(item) * Number(item.qty || item.quantity || 0)
 const emptyDiscount = () => ({ enabled: false, type: '', customerName: '', idNumber: '' })
 const emptyPayment = () => ({ method: 'Cash', cashReceived: '', referenceNumber: '', accountNumber: '09', bankName: '' })
+const MAX_OPEN_ORDER_TABS = 6
 const createOrderTab = (index = 1) => ({
   id: `WI-${String(index).padStart(3, '0')}`,
   cart: [],
@@ -310,7 +311,7 @@ export default function CashierPage() {
 
   function openNewOrderTab() {
     setOrderTabs((current) => {
-      if (current.length >= 3) return current
+      if (current.length >= MAX_OPEN_ORDER_TABS) return current
       const nextIndex = Math.max(0, ...current.map((tab) => Number(tab.id.replace('WI-', '')) || 0)) + 1
       const nextTab = createOrderTab(nextIndex)
       setActiveOrderId(nextTab.id)
@@ -532,7 +533,7 @@ export default function CashierPage() {
           </div>
           <div className="legacy-pos-heading">
             <div>
-              <div className="cashier-menu-title-row"><div className="cashier-menu-title"><h1>Menu</h1><button type="button" className="cashier-fullscreen" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}><Expand size={16} /> <span>{isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}</span></button></div><div className="cashier-menu-actions"><button type="button" className="cashier-new-order" onClick={openNewOrderTab} disabled={orderTabs.length >= 3}><Plus size={18} /> New Order</button></div></div>
+              <div className="cashier-menu-title-row"><div className="cashier-menu-title"><h1>Menu</h1><button type="button" className="cashier-fullscreen" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}><Expand size={16} /> <span>{isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}</span></button></div><div className="cashier-menu-actions"><button type="button" className="cashier-new-order" onClick={openNewOrderTab} disabled={orderTabs.length >= MAX_OPEN_ORDER_TABS}><Plus size={18} /> New Order</button></div></div>
             </div>
             
           </div>
