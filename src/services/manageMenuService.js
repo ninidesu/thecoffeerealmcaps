@@ -9,7 +9,7 @@ function imagePath(value) {
   return value.startsWith('/') ? value : `/${value}`
 }
 
-function normalizeMenuItem(row) {
+function normalizeMenuItem(row, orderCount = 0) {
   return {
     id: row.id,
     mainCategoryId: row.main_category_id,
@@ -41,6 +41,7 @@ function normalizeMenuItem(row) {
     isArchived: Boolean(row.is_archived),
     updatedAt: row.updated_at,
     createdAt: row.created_at,
+    orderCount,
   }
 }
 
@@ -57,12 +58,23 @@ export async function fetchSubcategories() {
 }
 
 export async function fetchManageMenuItems() {
-  const { data, error } = await supabase
-    .from('menu_items')
-    .select('*, subcategories(id,name,display_name), main_categories(id,name,display_name)')
-    .order('sort_order')
+  const [menuResult, orderItemsResult] = await Promise.all([
+    supabase
+      .from('menu_items')
+      .select('*, subcategories(id,name,display_name), main_categories(id,name,display_name)')
+      .order('sort_order'),
+    supabase.from('order_items').select('menu_item_id,quantity'),
+  ])
+  const { data, error } = menuResult
   if (error) throw error
-  return (data || []).map(normalizeMenuItem)
+  const orderCounts = new Map()
+  if (!orderItemsResult.error) {
+    for (const orderItem of orderItemsResult.data || []) {
+      if (!orderItem.menu_item_id) continue
+      orderCounts.set(orderItem.menu_item_id, (orderCounts.get(orderItem.menu_item_id) || 0) + Number(orderItem.quantity || 0))
+    }
+  }
+  return (data || []).map((row) => normalizeMenuItem(row, orderCounts.get(row.id) || 0))
 }
 
 export async function fetchIngredientOptions() {

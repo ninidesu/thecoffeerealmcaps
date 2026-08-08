@@ -1,0 +1,126 @@
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
+
+const STAFF_PREFERENCES_CACHE_KEY = 'tcr:staff-preferences'
+const STAFF_PREFERENCES_EVENT = 'tcr:staff-preferences-changed'
+const STAFF_FILTER_CACHE_PREFIX = 'tcr:staff-filters:'
+
+export const DEFAULT_STAFF_PREFERENCES = {
+  landing_view: 'orders',
+  order_queue: 'active',
+  order_sort: 'priority',
+  fulfillment_filter: 'all',
+  overdue_highlighting: true,
+  inventory_tab: 'ingredient',
+  inventory_filter: 'all',
+  table_density: 'comfortable',
+  rows_per_page: 25,
+  remember_filters: true,
+  reduced_motion: 'system',
+  high_contrast: false,
+  font_size: 'standard',
+  notify_new_orders: true,
+  notify_payment_proofs: true,
+  notify_low_stock: true,
+  notify_menu_changes: false,
+  notify_customer_cancellations: true,
+  system_change_popups: true,
+  system_error_popups: true,
+}
+
+function cachePreferences(preferences) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(STAFF_PREFERENCES_CACHE_KEY, JSON.stringify(preferences))
+  if (!preferences.remember_filters) {
+    Object.keys(window.sessionStorage).filter((key) => key.startsWith(STAFF_FILTER_CACHE_PREFIX)).forEach((key) => window.sessionStorage.removeItem(key))
+  }
+  window.dispatchEvent(new CustomEvent(STAFF_PREFERENCES_EVENT, { detail: preferences }))
+}
+
+export function getCachedStaffPreferences() {
+  if (typeof window === 'undefined') return DEFAULT_STAFF_PREFERENCES
+  try {
+    return { ...DEFAULT_STAFF_PREFERENCES, ...JSON.parse(window.localStorage.getItem(STAFF_PREFERENCES_CACHE_KEY) || '{}') }
+  } catch {
+    return DEFAULT_STAFF_PREFERENCES
+  }
+}
+
+export function shouldShowSystemNotification(type) {
+  const preferences = getCachedStaffPreferences()
+  return type === 'error' ? preferences.system_error_popups : preferences.system_change_popups
+}
+
+export function subscribeToStaffPreferences(callback) {
+  if (typeof window === 'undefined') return () => {}
+  const receive = (event) => callback({ ...DEFAULT_STAFF_PREFERENCES, ...(event.detail || {}) })
+  window.addEventListener(STAFF_PREFERENCES_EVENT, receive)
+  return () => window.removeEventListener(STAFF_PREFERENCES_EVENT, receive)
+}
+
+export function getRememberedStaffFilters(scope) {
+  if (typeof window === 'undefined' || !getCachedStaffPreferences().remember_filters) return null
+  try {
+    return JSON.parse(window.sessionStorage.getItem(`${STAFF_FILTER_CACHE_PREFIX}${scope}`) || 'null')
+  } catch {
+    return null
+  }
+}
+
+export function rememberStaffFilters(scope, values) {
+  if (typeof window === 'undefined') return
+  const key = `${STAFF_FILTER_CACHE_PREFIX}${scope}`
+  if (!getCachedStaffPreferences().remember_filters) {
+    window.sessionStorage.removeItem(key)
+    return
+  }
+  window.sessionStorage.setItem(key, JSON.stringify(values))
+}
+
+export async function fetchStaffPreferences(userId) {
+  if (!isSupabaseConfigured || !userId) {
+    cachePreferences(DEFAULT_STAFF_PREFERENCES)
+    return DEFAULT_STAFF_PREFERENCES
+  }
+  const { data, error } = await supabase.from('staff_preferences').select('*').eq('user_id', userId).maybeSingle()
+  if (error) throw error
+  const preferences = { ...DEFAULT_STAFF_PREFERENCES, ...(data || {}) }
+  cachePreferences(preferences)
+  return preferences
+}
+
+export async function saveStaffPreferences(userId, values) {
+  if (!isSupabaseConfigured) throw new Error('Supabase is not configured.')
+  const preferences = Object.fromEntries(Object.keys(DEFAULT_STAFF_PREFERENCES).map((key) => [key, values[key]]))
+  const { data, error } = await supabase
+    .from('staff_preferences')
+    .upsert({ user_id: userId, ...preferences, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+    .select()
+    .single()
+  if (error) throw error
+  cachePreferences({ ...DEFAULT_STAFF_PREFERENCES, ...data })
+  return data
+}
+
+export async function saveStaffProfile(userId, values) {
+  if (!isSupabaseConfigured) throw new Error('Supabase is not configured.')
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ full_name: values.full_name.trim(), username: values.username.trim() || null, updated_at: new Date().toISOString() })
+    .eq('id', userId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function changeStaffPassword(password) {
+  if (!isSupabaseConfigured) throw new Error('Supabase is not configured.')
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) throw error
+}
+
+export async function verifyStaffCurrentPassword(email, password) {
+  if (!isSupabaseConfigured) throw new Error('Supabase is not configured.')
+  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) throw new Error('Your current password is incorrect.')
+}
