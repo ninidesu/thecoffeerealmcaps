@@ -32,11 +32,31 @@ export async function getCurrentPortalSession() {
   return { session: sessionData.session, profile, error: profileError || null }
 }
 
-export async function signInPortal({ email, password, role }) {
+export async function signInPortal({ identifier, email, password, role }) {
   if (!isSupabaseConfigured) throw new Error('Supabase is not configured yet.')
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  const requestedRole = normalizeRole(role)
+  const loginIdentifier = String(identifier || email || '').trim()
+  let loginEmail = loginIdentifier
+
+  if (requestedRole === 'staff' && !loginIdentifier.includes('@')) {
+    const { data: loginResult, error: loginError } = await supabase.functions.invoke('staff-username-login', {
+      body: { username: loginIdentifier, password },
+    })
+    if (loginError) throw new Error('Unable to complete staff sign-in. Please try again.')
+    if (!loginResult?.success || !loginResult.session) throw new Error(loginResult?.error || 'Invalid email, username, or password.')
+    const { data: sessionData, error: sessionError } = await supabase.auth.setSession(loginResult.session)
+    if (sessionError) throw sessionError
+    return verifyPortalRole(sessionData, role)
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password })
   if (error) throw error
 
+  return verifyPortalRole(data, role)
+}
+
+async function verifyPortalRole(data, role) {
+  const requestedRole = normalizeRole(role)
   const userId = data.user?.id
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
@@ -47,7 +67,6 @@ export async function signInPortal({ email, password, role }) {
   if (profileError) throw profileError
   if (!profile) throw new Error('Login succeeded, but no staff profile was found for this account.')
 
-  const requestedRole = normalizeRole(role)
   const actualRole = normalizeRole(profile.role)
   const roleMatches = requestedRole === actualRole || (requestedRole === 'staff' && actualRole === 'operational_staff')
   if (!roleMatches) {

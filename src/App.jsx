@@ -15,6 +15,7 @@ import OrderPreparationPage from './pages/OrderPreparationPage'
 import PortalLoginPage from './pages/PortalLoginPage'
 import SalesReportPage from './pages/SalesReportPage'
 import StaffDashboard from './pages/StaffDashboard'
+import StaffSettingsPage from './pages/StaffSettingsPage'
 import TransactionsPage from './pages/TransactionsPage'
 import {
   AboutPage,
@@ -107,6 +108,10 @@ export default function App() {
         <Route
           path="/staff/transactions"
           element={<ProtectedRoute allowedRoles={['staff', 'operational_staff']}><TransactionsPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/staff/settings"
+          element={<ProtectedRoute allowedRoles={['staff', 'operational_staff']}><StaffSettingsPage /></ProtectedRoute>}
         />
 
         <Route path="*" element={<NotFoundPage />} />

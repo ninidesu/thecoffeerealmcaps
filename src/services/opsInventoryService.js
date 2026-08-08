@@ -1,5 +1,29 @@
 import { supabase } from '../lib/supabase'
 
+const UNIT_ALIASES = {
+  ml: ['ml', 'milliliter', 'milliliters', 'mL'], liter: ['l', 'L', 'liter', 'liters'],
+  gram: ['g', 'gram', 'grams'], kilogram: ['kg', 'kilogram', 'kilograms'],
+  piece: ['pc', 'pcs', 'piece', 'pieces'],
+}
+function normalizeInventoryPayload(payload) {
+  const rawUnit = String(payload.unit || '').trim()
+  const unit = rawUnit.toLowerCase()
+  const isLiter = UNIT_ALIASES.liter.map((value) => value.toLowerCase()).includes(unit)
+  const isKilogram = UNIT_ALIASES.kilogram.includes(unit)
+  const factor = isLiter || isKilogram ? 1000 : 1
+  const canonicalUnit = isLiter ? 'milliliter' : isKilogram ? 'gram'
+    : UNIT_ALIASES.ml.map((value) => value.toLowerCase()).includes(unit) ? 'milliliter'
+      : UNIT_ALIASES.gram.includes(unit) ? 'gram'
+        : UNIT_ALIASES.piece.includes(unit) ? 'piece' : rawUnit.toLowerCase()
+  return {
+    ...payload,
+    unit: canonicalUnit,
+    initialQuantity: Number(payload.initialQuantity ?? 0) * factor,
+    minStockLevel: Number(payload.minStockLevel ?? 0) * factor,
+    highStockLevel: Number(payload.highStockLevel ?? 0) * factor,
+  }
+}
+
 export async function fetchIngredients() {
   const { data, error } = await supabase
     .from('ingredients')
@@ -25,7 +49,7 @@ export async function fetchIngredients() {
 export async function fetchFinishedProducts() {
   const { data, error } = await supabase
     .from('finished_products')
-    .select('id,name,category,menu_item_id,unit,quantity,min_stock_level,high_stock_level,supplier,notes,is_archived,updated_at')
+    .select('id,name,category,menu_item_id,unit,quantity,min_stock_level,high_stock_level,supplier,notes,is_archived,updated_at,finished_product_sale_mappings(menu_item_id,variant_key,units_per_sale)')
     .eq('is_archived', false)
   if (error) throw error
   return (data || []).map((row) => ({
@@ -36,6 +60,7 @@ export async function fetchFinishedProducts() {
     supplier: row.supplier,
     notes: row.notes,
     menuItemId: row.menu_item_id,
+    saleMappings: (row.finished_product_sale_mappings || []).map((mapping) => ({ menuItemId: mapping.menu_item_id, variantKey: mapping.variant_key || '', unitsPerSale: Number(mapping.units_per_sale) })),
     quantity: Number(row.quantity),
     minStockLevel: Number(row.min_stock_level),
     highStockLevel: Number(row.high_stock_level),
@@ -129,7 +154,7 @@ export async function setMenuItemSupplies(menuItemId, supplies) {
 }
 
 export async function fetchMenuItemOptions() {
-  const { data, error } = await supabase.from('menu_items').select('id,name').eq('is_archived', false).order('name')
+  const { data, error } = await supabase.from('menu_items').select('id,name,variant_options').eq('is_archived', false).order('name')
   if (error) throw error
   return data || []
 }
@@ -241,10 +266,11 @@ export async function fetchRecentActivity(limit = 40) {
 }
 
 export async function upsertIngredient(payload) {
+  const normalized = normalizeInventoryPayload(payload)
   const { data, error } = await supabase.rpc('staff_upsert_ingredient', {
-    p_id: payload.id || null, p_name: payload.name, p_category: payload.category || null, p_type: payload.type,
-    p_unit: payload.unit, p_min: payload.minStockLevel, p_high: payload.highStockLevel,
-    p_supplier: payload.supplier || null, p_notes: payload.notes || null, p_initial_quantity: payload.initialQuantity ?? 0,
+    p_id: normalized.id || null, p_name: normalized.name, p_category: normalized.category || null, p_type: normalized.type,
+    p_unit: normalized.unit, p_min: normalized.minStockLevel, p_high: normalized.highStockLevel,
+    p_supplier: normalized.supplier || null, p_notes: normalized.notes || null, p_initial_quantity: normalized.initialQuantity,
   })
   if (error) throw error
   return data
@@ -255,12 +281,24 @@ export async function archiveIngredient(id) {
 }
 
 export async function upsertFinishedProduct(payload) {
+  const normalized = normalizeInventoryPayload(payload)
   const { data, error } = await supabase.rpc('staff_upsert_finished_product', {
-    p_id: payload.id || null, p_name: payload.name, p_category: payload.category || null, p_menu_item_id: payload.menuItemId || null,
-    p_unit: payload.unit, p_min: payload.minStockLevel, p_high: payload.highStockLevel,
-    p_supplier: payload.supplier || null, p_notes: payload.notes || null, p_initial_quantity: payload.initialQuantity ?? 0,
+    p_id: normalized.id || null, p_name: normalized.name, p_category: normalized.category || null, p_menu_item_id: normalized.menuItemId || null,
+    p_unit: normalized.unit, p_min: normalized.minStockLevel, p_high: normalized.highStockLevel,
+    p_supplier: normalized.supplier || null, p_notes: normalized.notes || null, p_initial_quantity: normalized.initialQuantity,
   })
   if (error) throw error
+  if (payload.saleMappings) {
+    const { error: mappingError } = await supabase.rpc('staff_set_finished_product_sale_mappings', {
+      p_finished_product_id: data,
+      p_mappings: payload.saleMappings.map((mapping) => ({
+        menu_item_id: mapping.menuItemId,
+        variant_key: mapping.variantKey || null,
+        units_per_sale: Number(mapping.unitsPerSale),
+      })),
+    })
+    if (mappingError) throw mappingError
+  }
   return data
 }
 export async function archiveFinishedProduct(id) {
@@ -269,10 +307,11 @@ export async function archiveFinishedProduct(id) {
 }
 
 export async function upsertSupply(payload) {
+  const normalized = normalizeInventoryPayload(payload)
   const { data, error } = await supabase.rpc('staff_upsert_supply', {
-    p_id: payload.id || null, p_name: payload.name, p_category: payload.category || null,
-    p_unit: payload.unit, p_min: payload.minStockLevel, p_high: payload.highStockLevel,
-    p_supplier: payload.supplier || null, p_notes: payload.notes || null, p_initial_quantity: payload.initialQuantity ?? 0,
+    p_id: normalized.id || null, p_name: normalized.name, p_category: normalized.category || null,
+    p_unit: normalized.unit, p_min: normalized.minStockLevel, p_high: normalized.highStockLevel,
+    p_supplier: normalized.supplier || null, p_notes: normalized.notes || null, p_initial_quantity: normalized.initialQuantity,
   })
   if (error) throw error
   return data
