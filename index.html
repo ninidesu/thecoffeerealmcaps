@@ -5,16 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#1b2f22" />
     <meta name="description" content="thecoffeerealm — thoughtfully brewed coffee, online ordering, and café operations." />
-    <script>
-      (() => {
-        const stored = localStorage.getItem('coffee-realm-management-theme')
-        const saved = ['system', 'light', 'dark'].includes(stored) ? stored : 'system'
-        const theme = saved === 'system'
-          ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-          : saved
-        document.documentElement.dataset.theme = theme
-      })()
-    </script>
     <title>thecoffeerealm</title>
   </head>
   <body>

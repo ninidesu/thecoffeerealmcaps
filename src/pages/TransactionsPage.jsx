@@ -1,9 +1,8 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import {
-  AlertTriangle, Ban, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock3, Download, ExternalLink, Eye,
-  FileText, Filter, MoreVertical, PhilippinePeso, Printer, ReceiptText, RotateCcw,
+  AlertTriangle, Ban, Banknote, Check, ChevronDown, Clock3, Download, ExternalLink, Eye,
+  FileText, Filter, MoreVertical, PhilippinePeso, Printer, ReceiptText, RefreshCw, RotateCcw,
   Search, Settings2, ShoppingBag, TrendingUp, Undo2, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
@@ -12,16 +11,10 @@ import { describeError } from '../utils/describeError'
 import { getCurrentPortalSession, normalizeRole } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import {
-  exportTransactionsToPdf, exportTransactionsToXlsx, fetchTransactionAudit, fetchTransactionById, fetchTransactions,
-  fetchTransactionsSummary, fetchTransactionStaffOptions, getPaymentProofUrl,
+  exportTransactionsToCsv, fetchTransactionAudit, fetchTransactionById, fetchTransactions,
+  fetchTransactionsSummary, fetchTransactionStaffOptions, getPaymentProofUrl, printSummaryReport,
   processRefund, correctPaymentStatus, requestRefund, voidOrder,
 } from '../services/transactionsService'
-import {
-  fetchStaffPreferences,
-  getRememberedStaffFilters,
-  rememberStaffFilters,
-  shouldShowSystemNotification,
-} from '../services/staffSettingsService'
 
 const ORDER_STATUS_OPTIONS = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Completed', 'Cancelled', 'Ordered']
 const PAYMENT_METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', bank_transfer: 'Bank Transfer', cod: 'Cash on Delivery', other: 'Other' }
@@ -45,7 +38,6 @@ const TAB_OPTIONS = [
   ['pickup', 'Pick-ups'],
   ['delivery', 'Delivery'],
   ['cancelled', 'Cancelled'],
-  ['voided', 'Voided'],
 ]
 
 function startCase(value) {
@@ -283,8 +275,7 @@ function reconciliationSummary(transactions) {
   }
 }
 
-function deriveTab(orderSource, fulfillment, orderStatus, voidedOnly) {
-  if (voidedOnly) return 'voided'
+function deriveTab(orderSource, fulfillment, orderStatus) {
   if (orderStatus === 'Cancelled') return 'cancelled'
   if (orderSource === 'cashier_pos' && fulfillment === 'walk-in') return 'walk-in'
   if (fulfillment === 'pickup') return 'pickup'
@@ -300,6 +291,7 @@ export default function TransactionsPage() {
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [now, setNow] = useState(() => new Date())
   const [toasts, setToasts] = useState([])
   const [busyId, setBusyId] = useState('')
   const [profile, setProfile] = useState(null)
@@ -314,7 +306,6 @@ export default function TransactionsPage() {
   const [paymentMethod, setPaymentMethod] = useState('all')
   const [paymentStatus, setPaymentStatus] = useState('all')
   const [orderStatus, setOrderStatus] = useState('all')
-  const [voidedOnly, setVoidedOnly] = useState(false)
   const [refundStatus, setRefundStatus] = useState('all')
   const [customerType, setCustomerType] = useState('all')
   const [staffFilter, setStaffFilter] = useState('all')
@@ -322,10 +313,8 @@ export default function TransactionsPage() {
   const [maxAmount, setMaxAmount] = useState('')
   const [sortBy, setSortBy] = useState('newest')
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
-  const [filtersReady, setFiltersReady] = useState(false)
+  const [pageSize, setPageSize] = useState(20)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
-  const [exporting, setExporting] = useState('')
   const [rowMenuId, setRowMenuId] = useState('')
 
   const [detailTarget, setDetailTarget] = useState(null)
@@ -335,77 +324,21 @@ export default function TransactionsPage() {
 
   const deferredSearch = useDeferredValue(search)
   const queryRef = useRef(null)
-  const filterDialogRef = useRef(null)
 
   useEffect(() => {
-    if (!filtersOpen) return undefined
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') setFiltersOpen(false)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    filterDialogRef.current?.focus()
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [filtersOpen])
+    const timer = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     getCurrentPortalSession().then(async ({ profile: currentProfile }) => {
       setProfile(currentProfile)
       try {
-        if (location.pathname.startsWith('/staff') && currentProfile?.id) {
-          const preferences = await fetchStaffPreferences(currentProfile.id)
-          setPageSize(preferences.rows_per_page)
-
-          const remembered = getRememberedStaffFilters('transactions')
-          if (remembered) {
-            setQuickRange(remembered.quickRange ?? 'all')
-            setDateFrom(remembered.dateFrom ?? '')
-            setDateTo(remembered.dateTo ?? '')
-            setSearch(remembered.search ?? '')
-            setOrderSource(remembered.orderSource ?? 'all')
-            setFulfillment(remembered.fulfillment ?? 'all')
-            setPaymentMethod(remembered.paymentMethod ?? 'all')
-            setPaymentStatus(remembered.paymentStatus ?? 'all')
-            setOrderStatus(remembered.orderStatus ?? 'all')
-            setVoidedOnly(Boolean(remembered.voidedOnly))
-            setRefundStatus(remembered.refundStatus ?? 'all')
-            setCustomerType(remembered.customerType ?? 'all')
-            setStaffFilter(remembered.staffFilter ?? 'all')
-            setMinAmount(remembered.minAmount ?? '')
-            setMaxAmount(remembered.maxAmount ?? '')
-            setSortBy(remembered.sortBy ?? 'newest')
-          }
-        }
         const options = await fetchTransactionStaffOptions()
         setStaffOptions(options)
-      } catch {
-        // Staff filtering remains available even when options cannot be loaded.
-      } finally {
-        setFiltersReady(true)
-      }
+      } catch {}
     })
-  }, [location.pathname])
-
-  useEffect(() => {
-    if (!filtersReady || !location.pathname.startsWith('/staff')) return
-    rememberStaffFilters('transactions', {
-      quickRange,
-      dateFrom,
-      dateTo,
-      search,
-      orderSource,
-      fulfillment,
-      paymentMethod,
-      paymentStatus,
-      orderStatus,
-      voidedOnly,
-      refundStatus,
-      customerType,
-      staffFilter,
-      minAmount,
-      maxAmount,
-      sortBy,
-    })
-  }, [filtersReady, location.pathname, quickRange, dateFrom, dateTo, search, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, voidedOnly, refundStatus, customerType, staffFilter, minAmount, maxAmount, sortBy])
+  }, [])
 
   const queryState = useMemo(() => ({
     page,
@@ -418,18 +351,17 @@ export default function TransactionsPage() {
     fulfillment,
     paymentMethod,
     paymentStatus,
-    orderStatus, voidedOnly,
+    orderStatus,
     refundStatus,
     customerType,
     staffId: staffFilter,
     minAmount,
     maxAmount,
-  }), [page, pageSize, sortBy, deferredSearch, dateFrom, dateTo, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, voidedOnly, refundStatus, customerType, staffFilter, minAmount, maxAmount])
+  }), [page, pageSize, sortBy, deferredSearch, dateFrom, dateTo, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, refundStatus, customerType, staffFilter, minAmount, maxAmount])
 
   queryRef.current = queryState
 
   const pushToast = (type, message) => {
-    if (!shouldShowSystemNotification(type)) return
     const id = crypto.randomUUID()
     setToasts((current) => [...current, { id, type, message }])
     setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 4500)
@@ -475,10 +407,8 @@ export default function TransactionsPage() {
 
   const shellRole = location.pathname.startsWith('/admin') ? 'admin' : 'staff'
   const canManageFinancialActions = ['admin', 'staff', 'operational_staff'].includes(normalizeRole(profile?.role))
-  const activeTab = deriveTab(orderSource, fulfillment, orderStatus, voidedOnly)
+  const activeTab = deriveTab(orderSource, fulfillment, orderStatus)
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
-  const firstResult = totalCount ? (page - 1) * pageSize + 1 : 0
-  const lastResult = Math.min(page * pageSize, totalCount)
   const summary = useMemo(() => metricSummary(summaryRows), [summaryRows])
   const reconciliation = useMemo(() => reconciliationSummary(summaryRows), [summaryRows])
   const filterRangeLabel = useMemo(() => buildFilterLabel({ quickRange, dateFrom, dateTo }), [quickRange, dateFrom, dateTo])
@@ -492,14 +422,13 @@ export default function TransactionsPage() {
     if (paymentMethod !== 'all') chips.push({ key: 'method', label: PAYMENT_METHOD_LABEL[paymentMethod] || paymentMethod, onRemove: () => { setPaymentMethod('all'); setPage(1) } })
     if (paymentStatus !== 'all') chips.push({ key: 'paymentStatus', label: PAYMENT_STATUS_OPTIONS.find(([value]) => value === paymentStatus)?.[1] || paymentStatus, onRemove: () => { setPaymentStatus('all'); setPage(1) } })
     if (orderStatus !== 'all') chips.push({ key: 'orderStatus', label: orderStatus, onRemove: () => { setOrderStatus('all'); setPage(1) } })
-    if (voidedOnly) chips.push({ key: 'voided', label: 'Voided', onRemove: () => { setVoidedOnly(false); setPage(1) } })
     if (refundStatus !== 'all') chips.push({ key: 'refundStatus', label: REFUND_STATUS_OPTIONS.find(([value]) => value === refundStatus)?.[1] || refundStatus, onRemove: () => { setRefundStatus('all'); setPage(1) } })
     if (customerType !== 'all') chips.push({ key: 'customerType', label: customerType === 'registered' ? 'Registered' : 'Guest', onRemove: () => { setCustomerType('all'); setPage(1) } })
     if (staffFilter !== 'all') chips.push({ key: 'staff', label: `Staff: ${staffOptions.find((staff) => staff.id === staffFilter)?.name || 'Selected'}`, onRemove: () => { setStaffFilter('all'); setPage(1) } })
     if (minAmount !== '') chips.push({ key: 'minAmount', label: `Min ${money(Number(minAmount || 0))}`, onRemove: () => { setMinAmount(''); setPage(1) } })
     if (maxAmount !== '') chips.push({ key: 'maxAmount', label: `Max ${money(Number(maxAmount || 0))}`, onRemove: () => { setMaxAmount(''); setPage(1) } })
     return chips
-  }, [quickRange, search, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, voidedOnly, refundStatus, customerType, staffFilter, staffOptions, minAmount, maxAmount])
+  }, [quickRange, search, orderSource, fulfillment, paymentMethod, paymentStatus, orderStatus, refundStatus, customerType, staffFilter, staffOptions, minAmount, maxAmount])
 
   const hasActiveFilters = activeFilterChips.length > 0
 
@@ -519,25 +448,15 @@ export default function TransactionsPage() {
       setOrderStatus('all')
       setOrderSource('all')
       setFulfillment('all')
-      setVoidedOnly(false)
-      return
-    }
-    if (tab === 'voided') {
-      setOrderStatus('all')
-      setOrderSource('all')
-      setFulfillment('all')
-      setVoidedOnly(true)
       return
     }
     if (tab === 'cancelled') {
       setOrderStatus('Cancelled')
       setOrderSource('all')
       setFulfillment('all')
-      setVoidedOnly(false)
       return
     }
     setOrderStatus('all')
-    setVoidedOnly(false)
     if (tab === 'walk-in') {
       setOrderSource('cashier_pos')
       setFulfillment('walk-in')
@@ -557,7 +476,6 @@ export default function TransactionsPage() {
     setPaymentMethod('all')
     setPaymentStatus('all')
     setOrderStatus('all')
-    setVoidedOnly(false)
     setRefundStatus('all')
     setCustomerType('all')
     setStaffFilter('all')
@@ -664,101 +582,129 @@ export default function TransactionsPage() {
     }
   }
 
-  const runExportXlsx = async () => {
-    try {
-      setExporting('xlsx')
-      await exportTransactionsToXlsx({ transactions: summaryRows, summary, reconciliation, filterLabel: filterRangeLabel, generatedBy: profile?.full_name || profile?.email })
-      pushToast('success', `Exported ${summaryRows.length} transaction${summaryRows.length === 1 ? '' : 's'} to Excel.`)
-    } catch (cause) {
-      pushToast('error', describeError(cause, 'Could not export the transaction workbook.'))
-    } finally {
-      setExporting('')
-      setExportMenuOpen(false)
-    }
+  const runExportCsv = () => {
+    const csv = exportTransactionsToCsv(summaryRows, profile?.full_name || profile?.email)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `transactions-${new Date().toISOString().slice(0, 10)}.csv`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    pushToast('success', `Exported ${summaryRows.length} transaction${summaryRows.length === 1 ? '' : 's'}.`)
+    setExportMenuOpen(false)
   }
 
-  const runExportPdf = async () => {
-    try {
-      setExporting('pdf')
-      await exportTransactionsToPdf({ transactions: summaryRows, summary, reconciliation, filterLabel: filterRangeLabel, generatedBy: profile?.full_name || profile?.email })
-      pushToast('success', 'Exported the transaction report as PDF.')
-    } catch (cause) {
-      pushToast('error', describeError(cause, 'Could not export the transaction PDF.'))
-    } finally {
-      setExporting('')
-      setExportMenuOpen(false)
-    }
+  const runExportPdfSummary = () => {
+    printSummaryReport({
+      summary,
+      reconciliation,
+      filterLabel: filterRangeLabel,
+      generatedBy: profile?.full_name || profile?.email,
+    })
+    setExportMenuOpen(false)
+  }
+
+  const runPrintReport = () => {
+    window.print()
+    setExportMenuOpen(false)
   }
 
   return (
-    <AppShell role={shellRole} title="Transactions" onRefresh={() => load(queryRef.current)}>
+    <AppShell role={shellRole} title="Transactions" eyebrow="Review payments, receipts, refunds, voids, and filtered sales history in one place." actions={
+      <div className="ops-header-actions">
+        <div className="ops-clock">
+          <span>{new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(now)}</span>
+          <b>{new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).format(now)} PHT</b>
+        </div>
+        <button type="button" className="ops-icon-button" aria-label="Refresh transactions" title="Refresh" onClick={() => load(queryRef.current)} disabled={loading}>
+          <RefreshCw size={18} className={loading ? 'spin' : ''} />
+        </button>
+        <div className="inv-overflow">
+          <button type="button" className="ops-main-action inv-record-btn" onClick={() => setExportMenuOpen((open) => !open)} disabled={loading || summaryRows.length === 0}>
+            <Download size={16} /> Export <ChevronDown size={14} />
+          </button>
+          {exportMenuOpen && (
+            <div className="inv-overflow-menu txn-export-menu" role="menu">
+              <button type="button" role="menuitem" onClick={runExportCsv}><FileText size={14} /> Export CSV</button>
+              <button type="button" role="menuitem" onClick={runExportPdfSummary}><ReceiptText size={14} /> Export PDF Summary</button>
+              <button type="button" role="menuitem" onClick={runPrintReport}><Printer size={14} /> Print Filtered Report</button>
+            </div>
+          )}
+        </div>
+      </div>
+    }>
       {error && !loading && <p className="form-error">{error}</p>}
 
       {loading && summaryRows.length === 0 ? (
-        <div className="txn-report-overview txn-report-skeleton">
-          {Array.from({ length: 4 }).map((_, index) => <div className="inv-skeleton-row txn-metric-skeleton" key={index} />)}
+        <div className="txn-metric-grid">
+          {Array.from({ length: 7 }).map((_, index) => <div className="inv-skeleton-row txn-metric-skeleton" key={index} />)}
         </div>
       ) : (
-        <section className="txn-report-overview dash-fade-in" aria-label="Financial snapshot">
-          <article className="txn-report-total">
-            <span>Net sales</span>
-            <b>{money(summary.netSales)}</b>
-            <p>Settled revenue after processed refunds.</p>
-            <div className="txn-report-total-meta"><span>Gross sales <b>{money(summary.grossSales)}</b></span><span>Refunds <b>{money(summary.refundedAmount)}</b></span><span>Cancelled <b>{summary.cancelledOrders}</b></span><span>Voided <b>{reconciliation.voids}</b></span></div>
-          </article>
-          <article className="txn-report-stat txn-report-stat--transactions txn-report-stat--text-only"><span>Total transactions</span><b>{summary.totalTransactions}</b><small>All recorded orders</small></article>
-          <article className="txn-report-stat txn-report-stat--completed txn-report-stat--text-only"><span>Completed sales</span><b>{summary.completedSales}</b><small>Paid and completed orders</small></article>
-          <article className="txn-report-stat txn-report-stat--average txn-report-stat--text-only"><span>Average order value</span><b>{money(summary.averageOrderValue)}</b><small>Across completed sales</small></article>
-        </section>
+        <div className="inv-summary-row txn-summary-row dash-fade-in">
+          <div className="inv-summary-card tone-neutral"><ReceiptText size={18} /><span>Total Transactions</span><b>{summary.totalTransactions}</b></div>
+          <div className="inv-summary-card tone-blue"><TrendingUp size={18} /><span>Gross Sales</span><b>{money(summary.grossSales)}</b></div>
+          <div className="inv-summary-card tone-green"><PhilippinePeso size={18} /><span>Net Sales</span><b>{money(summary.netSales)}</b></div>
+          <div className="inv-summary-card tone-green"><Check size={18} /><span>Completed Sales</span><b>{summary.completedSales}</b></div>
+          <div className="inv-summary-card tone-red"><Ban size={18} /><span>Cancelled Orders</span><b>{summary.cancelledOrders}</b></div>
+          <div className="inv-summary-card tone-red"><Undo2 size={18} /><span>Refunded Amount</span><b>{money(summary.refundedAmount)}</b></div>
+          <div className="inv-summary-card tone-amber"><Banknote size={18} /><span>Average Order Value</span><b>{money(summary.averageOrderValue)}</b></div>
+        </div>
       )}
 
-      <section className="txn-ledger-shell" aria-labelledby="txn-ledger-title">
-        <div className="txn-ledger-heading"><div><span className="settings-kicker">Transaction ledger</span><h2 id="txn-ledger-title">Recorded sales and payment activity</h2></div><div className="inv-overflow txn-ledger-export"><button type="button" className="ops-main-action inv-record-btn" onClick={() => setExportMenuOpen((open) => !open)} disabled={loading || summaryRows.length === 0 || Boolean(exporting)}><Download size={16} /> {exporting ? 'Preparing…' : 'Export'} <ChevronDown size={14} /></button>{exportMenuOpen && <div className="inv-overflow-menu txn-export-menu" role="menu"><button type="button" role="menuitem" onClick={runExportPdf}><ReceiptText size={14} /> Export as PDF</button><button type="button" role="menuitem" onClick={runExportXlsx}><FileText size={14} /> Export as XLSX</button></div>}</div></div>
       <div className="txn-toolbar-shell">
-        <div className="txn-filter-primary">
+        <div className="menu-manage-tools txn-toolbar-main">
           <label className="menu-manage-search">
             <Search size={17} /><span className="sr-only">Search transactions</span>
             <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder="Search order #, receipt, customer, email, phone..." />
             {search && <button type="button" className="menu-manage-search-clear" aria-label="Clear search" onClick={() => { setSearch(''); setPage(1) }}><X size={14} /></button>}
           </label>
-          <label className="txn-range-control"><span>Report period</span><select value={quickRange} onChange={(event) => { const nextRange = event.target.value; if (nextRange === 'custom') { setQuickRange('custom'); setFiltersOpen(true) } else applyQuickRange(nextRange) }}>
-            <option value="all">All Time</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="week">This Week</option><option value="month">This Month</option><option value="custom">Custom Range</option>
-          </select></label>
-          <div className="txn-toolbar-actions">
-            <button type="button" className="ops-secondary-action compact" onClick={() => setFiltersOpen((open) => !open)}><Filter size={14} /> All filters <ChevronDown size={14} className={filtersOpen ? 'rotated' : ''} /></button>
-            <label className="txn-select-control"><span>Sort</span><select value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Sort transactions">
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="highest">Highest amount</option>
-              <option value="lowest">Lowest amount</option>
-            </select></label>
-            {hasActiveFilters && <button type="button" className="ops-destructive-action compact" onClick={resetFilters}>Clear</button>}
+          <div className="menu-manage-chip-row">
+            {[['all', 'All Time'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This Week'], ['month', 'This Month']].map(([key, label]) => (
+              <button type="button" key={key} className={`menu-manage-chip ${quickRange === key ? 'active' : ''}`} onClick={() => applyQuickRange(key)}>{label}</button>
+            ))}
+            <button type="button" className={`menu-manage-chip ${quickRange === 'custom' ? 'active' : ''}`} onClick={() => { setQuickRange('custom'); setFiltersOpen(true) }}>Custom</button>
           </div>
         </div>
 
-        <div className="txn-filter-secondary">
-          <div className="txn-view-row">
-            <span className="txn-view-label">View</span>
-            <div className="txn-tab-row" role="tablist" aria-label="Transaction views">
-            {TAB_OPTIONS.map(([value, label]) => (
-              <button type="button" role="tab" aria-selected={activeTab === value} key={value} className={`txn-tab ${activeTab === value ? 'active' : ''}`} onClick={() => applyTab(value)}>
-                {label}
-              </button>
-            ))}
-            </div>
-          </div>
+        <div className="txn-tab-row" role="tablist" aria-label="Common transaction views">
+          {TAB_OPTIONS.map(([value, label]) => (
+            <button type="button" key={value} className={`txn-tab ${activeTab === value ? 'active' : ''}`} onClick={() => applyTab(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
 
+        <div className="inv-toolbar txn-toolbar-actions">
+          <button type="button" className="ops-secondary-action compact" onClick={() => setFiltersOpen((open) => !open)}><Filter size={14} /> Filters <ChevronDown size={14} className={filtersOpen ? 'rotated' : ''} /></button>
+          <select value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Sort transactions">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="highest">Highest amount</option>
+            <option value="lowest">Lowest amount</option>
+          </select>
+          <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }} aria-label="Rows per page">
+            <option value={10}>10 / page</option>
+            <option value={20}>20 / page</option>
+            <option value={50}>50 / page</option>
+            <option value={100}>100 / page</option>
+          </select>
+          <div className="txn-result-meta">
+            <b>{totalCount}</b>
+            <span>{filterRangeLabel}</span>
+          </div>
+          {hasActiveFilters && <button type="button" className="ops-destructive-action compact" onClick={resetFilters}>Reset All</button>}
         </div>
       </div>
 
       {filtersOpen && (
         <>
           <button type="button" className="txn-filter-backdrop" aria-label="Close filters" onClick={() => setFiltersOpen(false)} />
-          <div className="txn-filter-panel" ref={filterDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="txn-filter-title">
+          <div className="txn-filter-panel">
             <div className="txn-filter-panel-head">
               <div>
                 <span className="settings-kicker">Transaction filters</span>
-                <h3 id="txn-filter-title">Refine this sales history view</h3>
+                <h3>Refine this sales history view</h3>
               </div>
               <button type="button" className="ops-icon-button" aria-label="Close filters" onClick={() => setFiltersOpen(false)}><X size={18} /></button>
             </div>
@@ -766,40 +712,40 @@ export default function TransactionsPage() {
             <div className="txn-filter-grid">
               <label className="field compact"><span>Date from</span><input type="date" value={formatDateInput(dateFrom)} onChange={(event) => { setQuickRange('custom'); setDateFrom(event.target.value ? new Date(`${event.target.value}T00:00:00`).toISOString() : ''); setPage(1) }} /></label>
               <label className="field compact"><span>Date to</span><input type="date" value={formatDateInput(dateTo)} onChange={(event) => { setQuickRange('custom'); setDateTo(event.target.value ? new Date(`${event.target.value}T23:59:59`).toISOString() : ''); setPage(1) }} /></label>
-              <label className="field compact"><span>Order source</span><select value={orderSource} onChange={(event) => { setOrderSource(event.target.value); setPage(1) }}>
+              <select value={orderSource} onChange={(event) => { setOrderSource(event.target.value); setPage(1) }} aria-label="Order source">
                 <option value="all">All order sources</option>
                 <option value="customer_pos">Online</option>
                 <option value="cashier_pos">Walk-in</option>
-              </select></label>
-              <label className="field compact"><span>Fulfillment</span><select value={fulfillment} onChange={(event) => { setFulfillment(event.target.value); setPage(1) }}>
+              </select>
+              <select value={fulfillment} onChange={(event) => { setFulfillment(event.target.value); setPage(1) }} aria-label="Order type">
                 <option value="all">All order types</option>
                 <option value="delivery">Delivery</option>
                 <option value="pickup">Pickup</option>
                 <option value="walk-in">Walk-in</option>
-              </select></label>
-              <label className="field compact"><span>Payment method</span><select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setPage(1) }}>
+              </select>
+              <select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setPage(1) }} aria-label="Payment method">
                 <option value="all">All payment methods</option>
                 {Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select></label>
-              <label className="field compact"><span>Payment status</span><select value={paymentStatus} onChange={(event) => { setPaymentStatus(event.target.value); setPage(1) }}>
+              </select>
+              <select value={paymentStatus} onChange={(event) => { setPaymentStatus(event.target.value); setPage(1) }} aria-label="Payment status">
                 {PAYMENT_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select></label>
-              <label className="field compact"><span>Order status</span><select value={orderStatus} onChange={(event) => { setOrderStatus(event.target.value); setPage(1) }}>
+              </select>
+              <select value={orderStatus} onChange={(event) => { setOrderStatus(event.target.value); setPage(1) }} aria-label="Order status">
                 <option value="all">All order statuses</option>
                 {ORDER_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
-              </select></label>
-              <label className="field compact"><span>Refund status</span><select value={refundStatus} onChange={(event) => { setRefundStatus(event.target.value); setPage(1) }}>
+              </select>
+              <select value={refundStatus} onChange={(event) => { setRefundStatus(event.target.value); setPage(1) }} aria-label="Refund status">
                 {REFUND_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select></label>
-              <label className="field compact"><span>Customer type</span><select value={customerType} onChange={(event) => { setCustomerType(event.target.value); setPage(1) }}>
+              </select>
+              <select value={customerType} onChange={(event) => { setCustomerType(event.target.value); setPage(1) }} aria-label="Customer type">
                 <option value="all">Registered + Guest</option>
                 <option value="registered">Registered</option>
                 <option value="guest">Guest</option>
-              </select></label>
-              <label className="field compact"><span>Staff or cashier</span><select value={staffFilter} onChange={(event) => { setStaffFilter(event.target.value); setPage(1) }}>
+              </select>
+              <select value={staffFilter} onChange={(event) => { setStaffFilter(event.target.value); setPage(1) }} aria-label="Staff or cashier">
                 <option value="all">All staff / cashiers</option>
                 {staffOptions.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
-              </select></label>
+              </select>
               <label className="field compact"><span>Minimum amount</span><input type="number" min="0" value={minAmount} onChange={(event) => { setMinAmount(event.target.value); setPage(1) }} /></label>
               <label className="field compact"><span>Maximum amount</span><input type="number" min="0" value={maxAmount} onChange={(event) => { setMaxAmount(event.target.value); setPage(1) }} /></label>
             </div>
@@ -823,6 +769,20 @@ export default function TransactionsPage() {
         </div>
       )}
 
+      <div className="panel dash-panel txn-reconciliation">
+        <div className="panel-head">
+          <div><span>Payment Summary</span><small>Reconciliation for the current filtered period</small></div>
+        </div>
+        <div className="txn-reconciliation-grid">
+          {Object.entries(reconciliation.byMethod).map(([label, amount]) => (
+            <div className="txn-reconciliation-item" key={label}><span>{label}</span><b>{money(amount)}</b></div>
+          ))}
+          <div className="txn-reconciliation-item tone-red"><span>Refunds</span><b>{money(reconciliation.refunds)}</b></div>
+          <div className="txn-reconciliation-item tone-red"><span>Voids</span><b>{reconciliation.voids}</b></div>
+          {Object.keys(reconciliation.byMethod).length === 0 && reconciliation.refunds === 0 && reconciliation.voids === 0 && <p className="ops-proof-pending">No settled transactions for this filter set yet.</p>}
+        </div>
+      </div>
+
       {loading ? (
         <div className="txn-loading-shell">
           <div className="inv-skeleton">{Array.from({ length: 7 }).map((_, index) => <div className="inv-skeleton-row" key={index} />)}</div>
@@ -843,9 +803,17 @@ export default function TransactionsPage() {
               <thead>
                 <tr>
                   <th>Order #</th>
-                  <th>Customer / Date</th>
-                  <th>Payment</th>
-                  <th>Fulfillment / Status</th>
+                  <th>Receipt / Ref</th>
+                  <th>Customer</th>
+                  <th>Date &amp; Time</th>
+                  <th>Source</th>
+                  <th>Fulfillment</th>
+                  <th>Items</th>
+                  <th>Payment Method</th>
+                  <th>Payment Status</th>
+                  <th>Order Status</th>
+                  <th>Staff / Cashier</th>
+                  <th>Refund</th>
                   <th>Total</th>
                   <th aria-label="Actions" />
                 </tr>
@@ -855,11 +823,19 @@ export default function TransactionsPage() {
                   const paymentMeta = paymentStatusMeta(transaction)
                   const refundMeta = refundStatusMeta(transaction)
                   return (
-                    <tr key={transaction.id} className={`txn-row-in ${transaction.isVoided ? 'txn-row-voided' : ''} ${rowMenuId === transaction.id ? 'txn-row-menu-open' : ''}`}>
-                      <td><b>{transaction.orderNumber}</b><br /><small>{transaction.receiptNumber}</small></td>
-                      <td>{transaction.customerName}<br /><small>{formatDateTime(transaction.createdAt)}</small></td>
-                      <td><span className={`status-chip status-chip--${paymentMeta.tone}`}>{paymentMeta.label}</span><br /><small>{PAYMENT_METHOD_LABEL[transaction.paymentMethod] || '-'}</small></td>
-                      <td><span className={`status-chip status-chip--${statusTone(transaction.isVoided ? 'Voided' : transaction.status)}`}>{transaction.isVoided ? 'Voided' : transaction.status}</span><br /><small>{getSourceLabel(transaction)} · {startCase(transaction.fulfillment)} · {transaction.itemCount} item{transaction.itemCount === 1 ? '' : 's'}</small>{refundMeta.key !== 'not_applicable' && <><br /><span className={`status-chip status-chip--${refundMeta.tone}`}>{refundMeta.label}</span></>}</td>
+                    <tr key={transaction.id} className={`txn-row-in ${transaction.isVoided ? 'txn-row-voided' : ''}`}>
+                      <td><b>{transaction.orderNumber}</b></td>
+                      <td><b>{transaction.receiptNumber}</b><br /><small>{transaction.paymentReference || 'No payment reference'}</small></td>
+                      <td>{transaction.customerName}<br /><small>{transaction.isGuest ? 'Guest customer' : 'Registered customer'}</small></td>
+                      <td>{formatDateTime(transaction.createdAt)}</td>
+                      <td>{getSourceLabel(transaction)}</td>
+                      <td>{transaction.fulfillment}</td>
+                      <td>{transaction.itemCount}</td>
+                      <td>{PAYMENT_METHOD_LABEL[transaction.paymentMethod] || '-'}</td>
+                      <td><span className={`status-chip status-chip--${paymentMeta.tone}`}>{paymentMeta.label}</span></td>
+                      <td><span className={`status-chip status-chip--${statusTone(transaction.isVoided ? 'Voided' : transaction.status)}`}>{transaction.isVoided ? 'Voided' : transaction.status}</span></td>
+                      <td>{transaction.cashierName || '-'}</td>
+                      <td><span className={`status-chip status-chip--${refundMeta.tone}`}>{refundMeta.label}</span></td>
                       <td><b>{money(transaction.finalTotal)}</b></td>
                       <td>
                         <RowActionsMenu
@@ -913,22 +889,13 @@ export default function TransactionsPage() {
             })}
           </div>
 
-          <footer className="txn-pagination" aria-label="Transaction pagination">
-            <div className="txn-pagination-summary"><b>Showing {firstResult}-{lastResult}</b><span>of {totalCount} transactions</span></div>
-            <label className="txn-page-size"><span>Rows</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }} aria-label="Rows per page">
-              <option value={10}>10</option><option value={25}>25</option><option value={50}>50</option>
-            </select></label>
-            <div className="txn-page-nav">
-              <button type="button" aria-label="First page" title="First page" disabled={page === 1} onClick={() => setPage(1)}><ChevronsLeft size={16} /></button>
-              <button type="button" aria-label="Previous page" title="Previous page" disabled={page === 1} onClick={() => setPage((current) => current - 1)}><ChevronLeft size={16} /></button>
-              <span>Page <b>{page}</b> of {totalPages}</span>
-              <button type="button" aria-label="Next page" title="Next page" disabled={page === totalPages} onClick={() => setPage((current) => current + 1)}><ChevronRight size={16} /></button>
-              <button type="button" aria-label="Last page" title="Last page" disabled={page === totalPages} onClick={() => setPage(totalPages)}><ChevronsRight size={16} /></button>
-            </div>
-          </footer>
+          <div className="inv-pagination txn-pagination">
+            <button type="button" disabled={page === 1} onClick={() => setPage((current) => current - 1)}>Previous</button>
+            <span>Page {page} of {totalPages} - {totalCount} transactions</span>
+            <button type="button" disabled={page === totalPages} onClick={() => setPage((current) => current + 1)}>Next</button>
+          </div>
         </>
       )}
-      </section>
 
       {detailTarget && (
         <TransactionDrawer
@@ -982,43 +949,21 @@ function RowActionsMenu({
 }) {
   const canRefund = canManageFinancialActions && paymentStatusMeta(transaction).key === 'paid' && processedRefundAmount(transaction) < transaction.finalTotal && !transaction.isVoided
   const hasPendingRefund = Boolean(pendingRefund(transaction)) && canManageFinancialActions
-  const triggerRef = useRef(null)
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 })
-
-  useEffect(() => {
-    if (!open) return undefined
-    const placeMenu = () => {
-      const rect = triggerRef.current?.getBoundingClientRect()
-      if (!rect) return
-      const menuWidth = 220
-      const menuHeight = 340
-      const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth))
-      const top = window.innerHeight - rect.bottom >= menuHeight ? rect.bottom + 8 : Math.max(8, rect.top - menuHeight - 8)
-      setMenuPosition({ top, left })
-    }
-    placeMenu()
-    window.addEventListener('resize', placeMenu)
-    window.addEventListener('scroll', placeMenu, true)
-    return () => {
-      window.removeEventListener('resize', placeMenu)
-      window.removeEventListener('scroll', placeMenu, true)
-    }
-  }, [open])
-
   return (
     <div className="inv-overflow">
-      <button ref={triggerRef} type="button" className="ops-icon-button small txn-action-more" aria-label={`Actions for ${transaction.orderNumber}`} aria-expanded={open} onClick={onToggle}><MoreVertical size={15} /></button>
-      {open && createPortal(
-        <div className="txn-row-menu" role="menu" style={menuPosition}>
+      <button type="button" className="ops-icon-button small" aria-label={`Actions for ${transaction.orderNumber}`} aria-expanded={open} onClick={onToggle}><MoreVertical size={15} /></button>
+      {open && (
+        <div className="inv-overflow-menu" role="menu">
           <button type="button" role="menuitem" onClick={onViewDetails}><Eye size={14} /> View Details</button>
           <button type="button" role="menuitem" onClick={onViewReceipt}><ReceiptText size={14} /> View Receipt</button>
           <button type="button" role="menuitem" onClick={onPrintReceipt}><Printer size={14} /> Print Receipt</button>
           <button type="button" role="menuitem" onClick={onDownloadReceipt}><Download size={14} /> Download Receipt</button>
           {transaction.paymentProofPath && <button type="button" role="menuitem" onClick={onViewProof}><ExternalLink size={14} /> View Payment Proof</button>}
+          {transaction.isOnline && <button type="button" role="menuitem" onClick={onViewRelatedOrder}><ShoppingBag size={14} /> View Related Order</button>}
           {hasPendingRefund && <button type="button" role="menuitem" onClick={onProcessRefund}><Undo2 size={14} /> Process Refund</button>}
           {canRefund && <button type="button" role="menuitem" onClick={onRequestRefund}><RotateCcw size={14} /> Request Refund</button>}
           {canManageFinancialActions && !transaction.isVoided && <button type="button" role="menuitem" className="danger" onClick={onVoid}><Ban size={14} /> Void Transaction</button>}
-        </div>, document.body
+        </div>
       )}
     </div>
   )
@@ -1032,7 +977,6 @@ function TransactionDrawer({
   const [audit, setAudit] = useState([])
   const [proofUrl, setProofUrl] = useState('')
   const [loading, setLoading] = useState(true)
-  const drawerBodyRef = useRef(null)
 
   useEffect(() => {
     let active = true
@@ -1066,74 +1010,53 @@ function TransactionDrawer({
   const paymentMeta = paymentStatusMeta(transaction)
   const canRefund = canManageFinancialActions && paymentMeta.key === 'paid' && processedRefundAmount(transaction) < transaction.finalTotal && !transaction.isVoided
   const timeline = buildTimeline(transaction, audit)
-  const sectionIds = {
-    overview: `transaction-overview-${transaction.id}`,
-    order: `transaction-order-${transaction.id}`,
-    payment: `transaction-payment-${transaction.id}`,
-    history: `transaction-history-${transaction.id}`,
-  }
-  const scrollToSection = (section) => {
-    drawerBodyRef.current?.querySelector(`#${sectionIds[section]}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
 
   return (
     <div className="ops-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <aside className="ops-drawer txn-drawer" role="dialog" aria-modal="true" aria-labelledby="txn-drawer-title">
-        <header className="txn-drawer-header">
+        <header>
           <div>
             <span className="settings-kicker">{transaction.receiptNumber}</span>
             <h2 id="txn-drawer-title">{transaction.orderNumber}</h2>
           </div>
-          <div className="txn-header-total" aria-label={`Transaction total ${money(transaction.finalTotal)}`}>
-            <span>Total</span>
-            <b>{money(transaction.finalTotal)}</b>
-          </div>
           <button type="button" onClick={onClose} aria-label="Close transaction details"><X size={20} /></button>
         </header>
 
-        <nav className="txn-drawer-nav" aria-label="Transaction details sections">
-          {Object.entries({ overview: 'Overview', order: 'Order', payment: 'Payment', history: 'History' }).map(([key, label]) => (
-            <button key={key} type="button" onClick={() => scrollToSection(key)}>{label}</button>
-          ))}
-        </nav>
-
-        <div className="ops-drawer-body txn-drawer-body" ref={drawerBodyRef}>
-          <section id={sectionIds.overview} className="txn-detail-overview txn-drawer-section">
-            <div className="txn-section-heading">
-              <div><span>At a glance</span><h3>Transaction overview</h3></div>
-              <div className="txn-pill-row">
-                <span className={`status-chip status-chip--${statusTone(transaction.isVoided ? 'Voided' : transaction.status)}`}>{transaction.isVoided ? 'Voided' : transaction.status}</span>
-                <span className={`status-chip status-chip--${paymentMeta.tone}`}>{paymentMeta.label}</span>
-                <span className={`status-chip status-chip--${refundMeta.tone}`}>{refundMeta.label}</span>
-              </div>
+        <div className="ops-drawer-body">
+          <section className="txn-detail-overview">
+            <h3>Overview</h3>
+            <div className="txn-pill-row">
+              <span className={`status-chip status-chip--${statusTone(transaction.isVoided ? 'Voided' : transaction.status)}`}>{transaction.isVoided ? 'Voided' : transaction.status}</span>
+              <span className={`status-chip status-chip--${paymentMeta.tone}`}>{paymentMeta.label}</span>
+              <span className={`status-chip status-chip--${refundMeta.tone}`}>{refundMeta.label}</span>
+            </div>
+            <div className="txn-detail-grid">
+              <div><span>Receipt number</span><b>{transaction.receiptNumber}</b></div>
+              <div><span>Payment reference</span><b>{transaction.paymentReference || 'N/A'}</b></div>
+              <div><span>Order source</span><b>{getSourceLabel(transaction)}</b></div>
+              <div><span>Fulfillment</span><b>{transaction.fulfillment}</b></div>
+              <div><span>Created</span><b>{formatDateTime(transaction.createdAt)}</b></div>
+              <div><span>Staff / cashier</span><b>{transaction.cashierName || '-'}</b></div>
             </div>
             {transaction.isVoided && <p className="menu-badge-warning"><AlertTriangle size={13} /> Voided because: {transaction.voidedReason}</p>}
             {transaction.status === 'Cancelled' && <p className="menu-badge-warning"><AlertTriangle size={13} /> Cancelled by {transaction.cancelledByRole || 'Staff'} - {transaction.cancellationReason}{transaction.cancellationNotes ? ` (${transaction.cancellationNotes})` : ''}</p>}
-            <div className="txn-overview-cards">
-              <article className="txn-info-card">
-                <span>Customer</span>
-                <b>{transaction.customerName}</b>
-                <small>{transaction.isGuest ? 'Guest checkout' : 'Registered customer'}</small>
-                {(transaction.customerPhone || transaction.customerEmail) && <p>{transaction.customerPhone || transaction.customerEmail}</p>}
-              </article>
-              <article className="txn-info-card">
-                <span>Fulfillment</span>
-                <b>{transaction.fulfillment || 'Not specified'}</b>
-                <small>{getSourceLabel(transaction)} · {transaction.cashierName || 'No staff recorded'}</small>
-                {(transaction.scheduleDate || transaction.scheduleTime) && <p>{transaction.scheduleDate ? formatDateInput(transaction.scheduleDate) : ''}{transaction.scheduleDate && transaction.scheduleTime ? ' · ' : ''}{transaction.scheduleTime ? formatTime(transaction.scheduleTime) : ''}</p>}
-              </article>
-            </div>
+          </section>
+
+          <section>
+            <h3>Customer</h3>
             <div className="txn-detail-grid">
-              <div><span>Created</span><b>{formatDateTime(transaction.createdAt)}</b></div>
-              <div><span>Staff / cashier</span><b>{transaction.cashierName || '-'}</b></div>
+              <div><span>Name</span><b>{transaction.customerName}</b></div>
+              <div><span>Customer type</span><b>{transaction.isGuest ? 'Guest' : 'Registered'}</b></div>
               {transaction.customerEmail && <div><span>Email</span><b>{transaction.customerEmail}</b></div>}
               {transaction.customerPhone && <div><span>Phone</span><b>{transaction.customerPhone}</b></div>}
               {transaction.deliveryAddress && <div className="wide"><span>Delivery address</span><b>{transaction.deliveryAddress}</b></div>}
+              {transaction.scheduleDate && <div><span>Scheduled date</span><b>{formatDateInput(transaction.scheduleDate)}</b></div>}
+              {transaction.scheduleTime && <div><span>Scheduled time</span><b>{formatTime(transaction.scheduleTime)}</b></div>}
             </div>
           </section>
 
-          <section id={sectionIds.order} className="txn-drawer-section">
-            <div className="txn-section-heading"><div><span>Order details</span><h3>Items and totals</h3></div><b className="txn-item-count">{transaction.items.length} item{transaction.items.length === 1 ? '' : 's'}</b></div>
+          <section>
+            <h3>Items</h3>
             <ul className="txn-item-list">
               {transaction.items.map((item) => (
                 <li key={item.id}>
@@ -1144,25 +1067,21 @@ function TransactionDrawer({
                 </li>
               ))}
             </ul>
-            <div className="txn-total-list" aria-label="Order total breakdown">
-              <div><span>Subtotal</span><b>{money(transaction.subtotal)}</b></div>
-              <div><span>Discounts</span><b>{transaction.discountAmount > 0 ? `- ${money(transaction.discountAmount)}` : '—'}</b></div>
-              <div><span>Delivery fee</span><b>{transaction.deliveryFee > 0 ? money(transaction.deliveryFee) : '—'}</b></div>
-              <div className="total"><span>Total</span><b>{money(transaction.finalTotal)}</b></div>
-            </div>
           </section>
 
-          <section id={sectionIds.payment} className="txn-drawer-section">
-            <div className="txn-section-heading"><div><span>Payment</span><h3>Payment record</h3></div><span className={`status-chip status-chip--${paymentMeta.tone}`}>{paymentMeta.label}</span></div>
-            <div className="txn-payment-record">
-              <div className="txn-payment-method"><span>Method</span><b>{PAYMENT_METHOD_LABEL[transaction.paymentMethod] || '-'}</b></div>
-              <div className="txn-detail-grid">
-                {transaction.paymentReference && <div><span>Payment reference</span><b>{transaction.paymentReference}</b></div>}
-                {transaction.bankName && <div><span>Bank</span><b>{transaction.bankName}</b></div>}
-                {transaction.amountReceived != null && <div><span>Amount tendered</span><b>{money(transaction.amountReceived)}</b></div>}
-                {transaction.changeAmount != null && <div><span>Change</span><b>{money(transaction.changeAmount)}</b></div>}
-                {!transaction.paymentReference && !transaction.bankName && transaction.amountReceived == null && <div className="wide"><span>Payment reference</span><b>No additional payment details recorded</b></div>}
-              </div>
+          <section>
+            <h3>Payment & totals</h3>
+            <div className="txn-detail-grid">
+              <div><span>Subtotal</span><b>{money(transaction.subtotal)}</b></div>
+              <div><span>Discounts</span><b>{transaction.discountAmount > 0 ? `- ${money(transaction.discountAmount)}` : 'None'}</b></div>
+              <div><span>Delivery fee</span><b>{transaction.deliveryFee > 0 ? money(transaction.deliveryFee) : 'None'}</b></div>
+              <div><span>Total</span><b>{money(transaction.finalTotal)}</b></div>
+              <div><span>Payment method</span><b>{PAYMENT_METHOD_LABEL[transaction.paymentMethod] || '-'}</b></div>
+              <div><span>Payment status</span><b>{paymentMeta.label}</b></div>
+              {transaction.paymentReference && <div><span>Payment reference</span><b>{transaction.paymentReference}</b></div>}
+              {transaction.bankName && <div><span>Bank</span><b>{transaction.bankName}</b></div>}
+              {transaction.amountReceived != null && <div><span>Amount tendered</span><b>{money(transaction.amountReceived)}</b></div>}
+              {transaction.changeAmount != null && <div><span>Change</span><b>{money(transaction.changeAmount)}</b></div>}
             </div>
             {proofUrl && (
               <div className="txn-proof-card">
@@ -1173,8 +1092,8 @@ function TransactionDrawer({
           </section>
 
           {transaction.refunds.length > 0 && (
-            <section className="txn-drawer-section txn-exception-section">
-              <div className="txn-section-heading"><div><span>Exceptions</span><h3>Refund activity</h3></div><AlertTriangle size={18} /></div>
+            <section>
+              <h3>Refund & void details</h3>
               {transaction.refunds.map((refund) => (
                 <div key={refund.id} className="txn-refund-row">
                   <p><b>{money(refund.amount)}</b> - {refund.reason} <span className={`status-chip status-chip--${refund.status === 'processed' ? 'completed' : refund.status === 'rejected' ? 'cancelled' : 'attention'}`}>{startCase(refund.status)}</span></p>
@@ -1190,8 +1109,8 @@ function TransactionDrawer({
             </section>
           )}
 
-          <section id={sectionIds.history} className="txn-drawer-section">
-            <div className="txn-section-heading"><div><span>History</span><h3>Order activity</h3></div></div>
+          <section>
+            <h3>Order timeline</h3>
             <ul className="txn-timeline">
               {timeline.map((event) => (
                 <li key={`${event.label}-${event.time || 'pending'}`}>
@@ -1206,8 +1125,8 @@ function TransactionDrawer({
             </ul>
           </section>
 
-          <section className="txn-drawer-section txn-audit-section">
-            <div className="txn-section-heading"><div><span>Staff record</span><h3>Audit history</h3></div></div>
+          <section>
+            <h3>Audit history</h3>
             {loading ? <p className="ops-proof-pending">Loading transaction history...</p> : audit.length === 0 ? <p className="ops-proof-pending">No audited actions recorded yet.</p> : (
               <ul className="inv-movement-list">
                 {audit.map((entry) => (
@@ -1215,7 +1134,7 @@ function TransactionDrawer({
                     <span className={`inv-movement-type ${entry.action}`}>{entry.action.replace(/_/g, ' ')}</span>
                     <b>{entry.reason || 'No reason recorded'}</b>
                     <span className="inv-movement-meta">{entry.staffName} - {formatDateTime(entry.created_at)}</span>
-                    {(entry.previous_value || entry.new_value) && <details className="txn-audit-details"><summary>View recorded changes</summary><small className="txn-audit-json">Previous: {JSON.stringify(entry.previous_value || {})} | New: {JSON.stringify(entry.new_value || {})}</small></details>}
+                    {(entry.previous_value || entry.new_value) && <small className="txn-audit-json">Previous: {JSON.stringify(entry.previous_value || {})} | New: {JSON.stringify(entry.new_value || {})}</small>}
                   </li>
                 ))}
               </ul>
@@ -1224,16 +1143,11 @@ function TransactionDrawer({
         </div>
 
         <footer className="ops-drawer-footer txn-drawer-footer">
-          <button type="button" className="ops-main-action" onClick={() => onViewReceipt(transaction)}><Eye size={16} /> View Receipt</button>
-          <details className="txn-footer-more">
-            <summary aria-label="More transaction actions"><MoreVertical size={18} /></summary>
-            <div role="menu" className="txn-footer-menu">
-              <button type="button" role="menuitem" onClick={() => onPrintReceipt(transaction)}><Printer size={15} /> Print receipt</button>
-              <button type="button" role="menuitem" onClick={() => onDownloadReceipt(transaction)}><Download size={15} /> Download receipt</button>
-              {canRefund && <button type="button" role="menuitem" onClick={() => onRequestRefund(transaction)}><RotateCcw size={15} /> Request refund</button>}
-              {canManageFinancialActions && paymentMeta.key !== 'paid' && !transaction.isVoided && <button type="button" role="menuitem" onClick={() => onCorrectPayment(transaction)}><Settings2 size={15} /> Correct payment</button>}
-            </div>
-          </details>
+          <button type="button" className="ops-secondary-action" onClick={() => onViewReceipt(transaction)}><Eye size={16} /> View Receipt</button>
+          <button type="button" className="ops-secondary-action" onClick={() => onPrintReceipt(transaction)}><Printer size={16} /> Print</button>
+          <button type="button" className="ops-secondary-action" onClick={() => onDownloadReceipt(transaction)}><Download size={16} /> Download</button>
+          {canRefund && <button type="button" className="ops-secondary-action" onClick={() => onRequestRefund(transaction)}><RotateCcw size={16} /> Request Refund</button>}
+          {canManageFinancialActions && paymentMeta.key !== 'paid' && !transaction.isVoided && <button type="button" className="ops-secondary-action" onClick={() => onCorrectPayment(transaction)}><Settings2 size={16} /> Correct Payment</button>}
           {canManageFinancialActions && !transaction.isVoided && <button type="button" className="ops-destructive-action" onClick={() => onVoid(transaction)}><Ban size={16} /> Void</button>}
         </footer>
       </aside>

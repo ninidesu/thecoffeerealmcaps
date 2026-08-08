@@ -11,9 +11,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",
-    "exceljs": "^4.4.0",
     "framer-motion": "^12.42.2",
-    "jspdf": "^4.2.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

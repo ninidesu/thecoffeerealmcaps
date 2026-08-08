@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, Bell, Bike, Check, CheckCircle2, Clock, Coffee,
+  AlertTriangle, Bell, Bike, Check, CheckCircle2, ChevronDown, Clock, Coffee,
   MapPin, Package, Phone, RefreshCw, Search, ShoppingBag, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
@@ -10,8 +10,6 @@ import {
   fetchOpsOrders, fetchAddonNameMap, confirmOrder, advanceOrderStatus,
   cancelOrder, resolveCancellation, getPaymentProofUrl,
 } from '../services/opsOrderService'
-import { getCurrentPortalSession } from '../lib/auth'
-import { fetchStaffPreferences, getRememberedStaffFilters, rememberStaffFilters, shouldShowSystemNotification } from '../services/staffSettingsService'
 
 const PENDING_STATUSES = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation']
 
@@ -57,9 +55,10 @@ function isOverdue(order) {
   const when = scheduleDate(order)
   return when ? when.getTime() < Date.now() : false
 }
-function isScheduledOrder(order, referenceTime = new Date()) {
+function isAsap(order) {
   const when = scheduleDate(order)
-  return Boolean(when && when.getTime() - referenceTime.getTime() > 45 * 60 * 1000)
+  if (!when) return false
+  return when.getTime() - Date.now() <= 45 * 60 * 1000
 }
 function timeAgo(dateString) {
   const diffMs = Date.now() - new Date(dateString).getTime()
@@ -74,11 +73,6 @@ function scheduleLabel(order) {
   const when = scheduleDate(order)
   if (!when) return 'Schedule pending'
   return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(when)
-}
-function filterDateFor(order, view) {
-  const date = view === 'cancelled' ? order.cancelled_at || order.created_at : order.schedule_date
-  if (!date) return ''
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date(date).toLocaleDateString('en-CA')
 }
 
 function mainActionFor(order) {
@@ -110,43 +104,18 @@ export default function OrderPreparationPage() {
   const [confirmAction, setConfirmAction] = useState(null)
   const [cancelTarget, setCancelTarget] = useState(null)
   const [mobileStage, setMobileStage] = useState('pending')
-  const [activeTab, setActiveTab] = useState('active')
+  const [activeTab, setActiveTab] = useState('board')
 
   const [search, setSearch] = useState('')
   const [fulfillmentFilter, setFulfillmentFilter] = useState('all')
   const [paymentFilter, setPaymentFilter] = useState('all')
-  const [dateFilter, setDateFilter] = useState(() => new Date().toLocaleDateString('en-CA'))
-  const [sortBy, setSortBy] = useState('priority')
-  const [filtersReady, setFiltersReady] = useState(false)
+  const [timingFilter, setTimingFilter] = useState('all')
+  const [dateFilter, setDateFilter] = useState('')
+  const [sortBy, setSortBy] = useState('oldest')
+  const [filtersOpen, setFiltersOpen] = useState(false)
 
   const columnRefs = useRef({})
   useEffect(() => { const timer = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(timer) }, [])
-  useEffect(() => {
-    let active = true
-    getCurrentPortalSession().then(async ({ profile }) => {
-      if (!profile?.id) return
-      try {
-        const preferences = await fetchStaffPreferences(profile.id)
-        if (!active) return
-        const remembered = getRememberedStaffFilters('orders')
-        setActiveTab(remembered?.activeTab || preferences.order_queue)
-        setSortBy(remembered?.sortBy || preferences.order_sort)
-        setFulfillmentFilter(remembered?.fulfillmentFilter || preferences.fulfillment_filter)
-        if (remembered) {
-          setSearch(remembered.search || '')
-          setPaymentFilter(remembered.paymentFilter || 'all')
-          setDateFilter(remembered.dateFilter ?? new Date().toLocaleDateString('en-CA'))
-        }
-      } catch { /* Defaults remain available if preferences have not been migrated yet. */ }
-      finally { if (active) setFiltersReady(true) }
-    })
-    return () => { active = false }
-  }, [])
-
-  useEffect(() => {
-    if (!filtersReady) return
-    rememberStaffFilters('orders', { activeTab, search, fulfillmentFilter, paymentFilter, dateFilter, sortBy })
-  }, [activeTab, dateFilter, filtersReady, fulfillmentFilter, paymentFilter, search, sortBy])
 
   const load = async () => {
     setLoading(true)
@@ -164,7 +133,6 @@ export default function OrderPreparationPage() {
   useEffect(() => { load() }, [])
 
   const pushToast = (type, message) => {
-    if (!shouldShowSystemNotification(type)) return
     const id = crypto.randomUUID()
     setToasts((current) => [...current, { id, type, message }])
     setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 4500)
@@ -224,71 +192,41 @@ export default function OrderPreparationPage() {
     }
   }
 
-  const filteredByTab = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const matchesFilters = (order, view) => {
+    return orders.filter((order) => {
       if (q && !`${order.order_number} ${order.customer_name}`.toLowerCase().includes(q)) return false
       if (fulfillmentFilter !== 'all' && order.order_type !== fulfillmentFilter) return false
       if (paymentFilter !== 'all' && paymentMethod(order) !== paymentFilter) return false
-      if (dateFilter && filterDateFor(order, view) !== dateFilter) return false
+      if (timingFilter === 'asap' && !isAsap(order)) return false
+      if (timingFilter === 'scheduled' && isAsap(order)) return false
+      if (dateFilter && order.schedule_date !== dateFilter) return false
       return true
-    }
-    return {
-      active: orders.filter((order) => matchesFilters(order, 'active')),
-      scheduled: orders.filter((order) => matchesFilters(order, 'scheduled')),
-      cancelled: orders.filter((order) => matchesFilters(order, 'cancelled')),
-    }
-  }, [orders, search, fulfillmentFilter, paymentFilter, dateFilter])
-  const filtered = filteredByTab[activeTab]
+    })
+  }, [orders, search, fulfillmentFilter, paymentFilter, timingFilter, dateFilter])
 
   const sorted = useMemo(() => {
     const list = [...filtered]
-    const eventTime = (order) => activeTab === 'cancelled'
-      ? new Date(order.cancelled_at || order.created_at).getTime()
-      : scheduleDate(order)?.getTime() || 0
     if (sortBy === 'newest') list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     else if (sortBy === 'oldest') list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    else if (sortBy === 'scheduled') list.sort((a, b) => eventTime(a) - eventTime(b))
-    else if (sortBy === 'priority') list.sort((a, b) => activeTab === 'cancelled'
-      ? eventTime(b) - eventTime(a)
-      : Number(isOverdue(b)) - Number(isOverdue(a)) || eventTime(a) - eventTime(b))
+    else if (sortBy === 'scheduled') list.sort((a, b) => (scheduleDate(a)?.getTime() || 0) - (scheduleDate(b)?.getTime() || 0))
+    else if (sortBy === 'priority') list.sort((a, b) => Number(isOverdue(b)) - Number(isOverdue(a)) || (scheduleDate(a)?.getTime() || 0) - (scheduleDate(b)?.getTime() || 0))
     return list
-  }, [filtered, sortBy, activeTab])
+  }, [filtered, sortBy])
 
-  const activeColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key && !isScheduledOrder(o, now)) })), [sorted, now])
-  const scheduledColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key && isScheduledOrder(o, now)) })), [sorted, now])
-  const visibleColumns = activeTab === 'scheduled' ? scheduledColumns : activeColumns
-  const cancelledByCustomer = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && !o.cancellation_resolved && o.cancelled_by_role !== 'Operations Staff'), [sorted])
-  const cancelledByStaff = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && !o.cancellation_resolved && o.cancelled_by_role === 'Operations Staff'), [sorted])
-  const resolvedCancellations = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && o.cancellation_resolved), [sorted])
+  const columns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key) })), [sorted])
+  const cancelledByCustomer = useMemo(() => orders.filter((o) => stageOf(o) === 'cancelled' && !o.cancellation_resolved && o.cancelled_by_role !== 'Operations Staff'), [orders])
+  const cancelledByStaff = useMemo(() => orders.filter((o) => stageOf(o) === 'cancelled' && !o.cancellation_resolved && o.cancelled_by_role === 'Operations Staff'), [orders])
+  const resolvedCancellations = useMemo(() => orders.filter((o) => stageOf(o) === 'cancelled' && o.cancellation_resolved), [orders])
 
-  const activeOrderCount = filteredByTab.active.filter((o) => stageOf(o) !== 'cancelled' && !isScheduledOrder(o, now)).length
-  const scheduledOrderCount = filteredByTab.scheduled.filter((o) => stageOf(o) !== 'cancelled' && isScheduledOrder(o, now)).length
-  const cancelledOrderCount = filteredByTab.cancelled.filter((o) => stageOf(o) === 'cancelled').length
-  const today = now.toLocaleDateString('en-CA')
-  const yesterdayDate = new Date(now)
-  yesterdayDate.setDate(yesterdayDate.getDate() - 1)
-  const yesterday = yesterdayDate.toLocaleDateString('en-CA')
   const attentionCount = orders.filter((o) => stageOf(o) === 'pending' || isOverdue(o)).length
   const scrollToColumn = (key) => {
-    setActiveTab('active')
+    setActiveTab('board')
     columnRefs.current[key]?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
   }
 
   return (
-    <AppShell role="staff" title="Order Preparation" titleActions={
-      <div className="ops-order-view-toggle" role="tablist" aria-label="Order view">
-        <button type="button" role="tab" aria-selected={activeTab === 'active'} className={activeTab === 'active' ? 'active' : ''} onClick={() => setActiveTab('active')}>
-          Active Orders <b>{activeOrderCount}</b>
-        </button>
-        <button type="button" role="tab" aria-selected={activeTab === 'scheduled'} className={activeTab === 'scheduled' ? 'active' : ''} onClick={() => setActiveTab('scheduled')}>
-          Scheduled Orders <b>{scheduledOrderCount}</b>
-        </button>
-        <button type="button" role="tab" aria-selected={activeTab === 'cancelled'} className={activeTab === 'cancelled' ? 'active' : ''} onClick={() => setActiveTab('cancelled')}>
-          Cancelled Orders <b>{cancelledOrderCount}</b>
-        </button>
-      </div>
-    } actions={
+    <AppShell role="staff" title="Order Preparation" eyebrow="Verify payments, prepare orders, and manage fulfillment in real time." actions={
       <div className="ops-header-actions">
         <div className="ops-clock">
           <span>{new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric' }).format(now)}</span>
@@ -305,26 +243,70 @@ export default function OrderPreparationPage() {
     }>
       {error && <p className="form-error">{error}</p>}
 
+      <div className="ops-summary-row">
+        {COLUMNS.map((col) => {
+          const count = orders.filter((o) => stageOf(o) === col.key).length
+          const Icon = col.icon
+          return (
+            <button type="button" key={col.key} className={`ops-summary-card tone-${col.tone}`} onClick={() => scrollToColumn(col.key)}>
+              <Icon size={18} />
+              <span>{col.title}</span>
+              <b>{count}</b>
+            </button>
+          )
+        })}
+      </div>
+
       <div className="ops-toolbar">
         <label className="ops-search">
           <Search size={17} />
           <span className="sr-only">Search orders</span>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search order number or customer name" />
         </label>
-        <label className="ops-toolbar-field"><span>Fulfillment</span><select value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)}><option value="all">All</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></label>
-        <label className="ops-toolbar-field"><span>Payment method</span><select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="all">All methods</option><option value="gcash">GCash</option><option value="bank_transfer">Bank transfer</option><option value="cod">Cash on Delivery</option></select></label>
-        <label className="ops-toolbar-field"><span>Date</span><select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}><option value="">All dates</option><option value={today}>Today</option><option value={yesterday}>Yesterday</option></select></label>
-        <label className="ops-toolbar-field"><span>Sort by</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value)}><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="scheduled">{activeTab === 'cancelled' ? 'Cancelled time' : 'Scheduled time'}</option><option value="priority">Priority (overdue first)</option></select></label>
+        <button type="button" className="ops-filter-toggle" onClick={() => setFiltersOpen((v) => !v)} aria-expanded={filtersOpen}>
+          Filters <ChevronDown size={15} style={{ transform: filtersOpen ? 'rotate(180deg)' : 'none' }} />
+        </button>
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort orders">
+          <option value="oldest">Oldest first</option>
+          <option value="newest">Newest first</option>
+          <option value="scheduled">Scheduled time</option>
+          <option value="priority">Priority (overdue first)</option>
+        </select>
       </div>
-      {(activeTab === 'active' || activeTab === 'scheduled') && <>
+      {filtersOpen && (
+        <div className="ops-filters">
+          <label>Fulfillment
+            <select value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)}>
+              <option value="all">All</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option>
+            </select>
+          </label>
+          <label>Payment method
+            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+              <option value="all">All</option><option value="gcash">GCash</option><option value="bank_transfer">Bank Transfer</option><option value="cod">Cash on Delivery</option>
+            </select>
+          </label>
+          <label>Timing
+            <select value={timingFilter} onChange={(e) => setTimingFilter(e.target.value)}>
+              <option value="all">All</option><option value="asap">ASAP</option><option value="scheduled">Scheduled</option>
+            </select>
+          </label>
+          <label>Date
+            <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+          </label>
+          {(fulfillmentFilter !== 'all' || paymentFilter !== 'all' || timingFilter !== 'all' || dateFilter) && (
+            <button type="button" className="ops-clear-filters" onClick={() => { setFulfillmentFilter('all'); setPaymentFilter('all'); setTimingFilter('all'); setDateFilter('') }}>Clear filters</button>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <p className="customer-state">Loading orders…</p>
       ) : (
         <>
           <div className="ops-kanban">
-            {visibleColumns.map((col) => (
+            {columns.map((col) => (
               <div className={`ops-column tone-${col.tone}`} key={col.key} ref={(el) => { columnRefs.current[col.key] = el }}>
-                <header><span className="ops-column-dot" /><div><h3>{col.title}</h3><p>{col.subtitle}</p></div><span className="ops-column-count" aria-label={`${col.orders.length} orders`}>{col.orders.length}</span></header>
+                <header><span className="ops-column-dot" /><div><h3>{col.title}</h3><p>{col.subtitle}</p></div></header>
                 <div className="ops-column-body">
                   {col.orders.length === 0 ? <EmptyColumn /> : col.orders.map((order) => (
                     <OrderCard key={order.id} order={order} busy={busyId === order.id} onView={() => setDrawerOrder(order)}
@@ -338,16 +320,16 @@ export default function OrderPreparationPage() {
 
           <div className="ops-mobile">
             <div className="ops-mobile-tabs">
-              {visibleColumns.map((col) => (
+              {COLUMNS.map((col) => (
                 <button type="button" key={col.key} className={mobileStage === col.key ? 'active' : ''} onClick={() => setMobileStage(col.key)}>
-                  {col.title} ({col.orders.length})
+                  {col.title} ({columns.find((c) => c.key === col.key)?.orders.length || 0})
                 </button>
               ))}
             </div>
             <div className="ops-mobile-list">
-              {(visibleColumns.find((c) => c.key === mobileStage)?.orders || []).length === 0
+              {(columns.find((c) => c.key === mobileStage)?.orders || []).length === 0
                 ? <EmptyColumn />
-                : visibleColumns.find((c) => c.key === mobileStage).orders.map((order) => (
+                : columns.find((c) => c.key === mobileStage).orders.map((order) => (
                   <OrderCard key={order.id} order={order} busy={busyId === order.id} onView={() => setDrawerOrder(order)}
                     onMain={(action) => setConfirmAction({ order, ...action })}
                     onCancel={() => setCancelTarget(order)} />
@@ -356,21 +338,19 @@ export default function OrderPreparationPage() {
           </div>
         </>
       )}
-      </>}
 
-      {activeTab === 'cancelled' &&
       <section className="ops-cancellations">
-        <div className="ops-cancellations-heading">
-          <div><h2>Cancelled Orders</h2><p>Review, resolve, and keep a record of cancelled orders.</p></div>
-          <span>{cancelledOrderCount} total</span>
-        </div>
+        <h2>Cancellation</h2>
         <div className="ops-cancel-groups">
           <CancelGroup title="Cancelled by Customer" tone="red" orders={cancelledByCustomer} onView={setDrawerOrder} onResolve={runResolve} busyId={busyId} />
           <CancelGroup title="Cancelled by Operations Staff" tone="red" orders={cancelledByStaff} onView={setDrawerOrder} onResolve={runResolve} busyId={busyId} />
           <CancelGroup title="Resolved Cancelled Orders" tone="neutral" orders={resolvedCancellations} onView={setDrawerOrder} resolved />
         </div>
+        <div className="ops-legend">
+          {COLUMNS.map((col) => <span key={col.key}><i className={`tone-${col.tone}`} />{col.title}</span>)}
+          <span><i className="tone-red" />Cancellation states</span>
+        </div>
       </section>
-      }
 
       {drawerOrder && (
         <OrderDrawer order={orders.find((o) => o.id === drawerOrder.id) || drawerOrder} addonNames={addonNames} onClose={() => setDrawerOrder(null)}
@@ -440,11 +420,11 @@ function OrderCard({ order, busy, onView, onMain, onCancel }) {
 
 function CancelGroup({ title, tone, orders, onView, onResolve, resolved, busyId }) {
   return (
-    <section className={`ops-cancel-group tone-${tone}${resolved ? ' is-resolved' : ''}`}>
-      <header><div><span>{title}</span><small>{resolved ? 'Closed records' : 'Needs review'}</small></div><b>{orders.length}</b></header>
+    <div className={`ops-cancel-group tone-${tone}`}>
+      <header><span>{title}</span><b>{orders.length}</b></header>
       <div className="ops-cancel-list">
         {orders.length === 0 ? <EmptyColumn /> : orders.map((order) => (
-          <article className={`ops-cancel-card${resolved ? ' is-resolved' : ''}`} key={order.id}>
+          <article className="ops-cancel-card" key={order.id}>
             <div><b>{order.order_number}</b><span>{order.customer_name}</span></div>
             <p>{order.cancellation_reason}</p>
             <div className="ops-cancel-card-meta">
@@ -458,7 +438,7 @@ function CancelGroup({ title, tone, orders, onView, onResolve, resolved, busyId 
           </article>
         ))}
       </div>
-    </section>
+    </div>
   )
 }
 
