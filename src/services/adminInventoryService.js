@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase'
 const MOVEMENT_TABLES = [
   { table: 'inventory_movements', idColumn: 'ingredient_id', itemType: 'ingredient' },
   { table: 'finished_product_movements', idColumn: 'finished_product_id', itemType: 'finished_product' },
-  { table: 'supply_movements', idColumn: 'supply_id', itemType: 'supply' },
 ]
 
 function normalizeItem(row, itemType, quantity, minStockLevel, highStockLevel) {
@@ -28,14 +27,12 @@ function normalizeItem(row, itemType, quantity, minStockLevel, highStockLevel) {
 }
 
 export async function fetchInventoryItems() {
-  const [{ data: ingredients, error: ingredientsError }, { data: finishedProducts, error: finishedError }, { data: supplies, error: suppliesError }] = await Promise.all([
+  const [{ data: ingredients, error: ingredientsError }, { data: finishedProducts, error: finishedError }] = await Promise.all([
     supabase.from('ingredients').select('id,name,category,type,unit,supplier,notes,cost_per_unit,expiration_date,sku,created_at,inventory_stock(quantity,min_stock_level,high_stock_level,updated_at)').eq('is_archived', false),
     supabase.from('finished_products').select('id,name,category,menu_item_id,unit,quantity,min_stock_level,high_stock_level,supplier,notes,cost_per_unit,expiration_date,sku,updated_at').eq('is_archived', false),
-    supabase.from('supplies').select('id,name,category,unit,quantity,min_stock_level,high_stock_level,supplier,notes,cost_per_unit,expiration_date,sku,updated_at').eq('is_archived', false),
   ])
   if (ingredientsError) throw ingredientsError
   if (finishedError) throw finishedError
-  if (suppliesError) throw suppliesError
 
   const { data: recipeLinks, error: recipeError } = await supabase.from('menu_item_ingredients').select('ingredient_id')
   if (recipeError) throw recipeError
@@ -49,7 +46,6 @@ export async function fetchInventoryItems() {
       usedByCount: usedByCount.get(i.id) || 0,
     })),
     ...(finishedProducts || []).map((p) => ({ ...normalizeItem(p, 'finished_product', Number(p.quantity), Number(p.min_stock_level), Number(p.high_stock_level)), usedByCount: p.menu_item_id ? 1 : 0 })),
-    ...(supplies || []).map((s) => ({ ...normalizeItem(s, 'supply', Number(s.quantity), Number(s.min_stock_level), Number(s.high_stock_level)), usedByCount: 0 })),
   ]
   return items
 }

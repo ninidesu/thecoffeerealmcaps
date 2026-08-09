@@ -13,15 +13,15 @@ It supports:
 
 Supabase Auth SMTP is for account emails only, such as sign up confirmation, password reset, and OTP-style auth messages.
 
-Order receipts are business emails. They can include order items, payment details, and receipt attachments, so they belong in a separate server-side function.
+Order receipts are business emails. They can include order items, payment details, and receipt attachments, so they belong in a separate server-side function. The function can use the same Gmail account, but it cannot read the SMTP password stored in Supabase Auth.
 
 ## Required Supabase secrets
 
 Set these in Supabase Dashboard → Edge Functions → Secrets, or with the Supabase CLI:
 
 ```bash
-supabase secrets set RESEND_API_KEY="your_resend_api_key"
-supabase secrets set MAIL_FROM_EMAIL="orders@your-domain.com"
+supabase secrets set GMAIL_SMTP_USER="your-gmail-address@gmail.com"
+supabase secrets set GMAIL_SMTP_APP_PASSWORD="your_16_character_google_app_password"
 supabase secrets set MAIL_FROM_NAME="thecoffeerealm"
 supabase secrets set STORE_NAME="thecoffeerealm"
 supabase secrets set STORE_ADDRESS="Lot 1 Block 210 Mark Street corner Dollar Street, Quezon City"
@@ -87,8 +87,12 @@ const { data, error } = await supabase.functions.invoke("send-order-email", {
 });
 ```
 
-## Note about Gmail SMTP
+## Gmail SMTP details
 
-Use Gmail SMTP in Supabase Auth for sign up and password reset emails.
+Supabase Auth continues using its Gmail SMTP configuration for sign up,
+password reset, and OTP emails. This Edge Function separately connects to
+`smtp.gmail.com` over TLS port 465 for order emails and receipt attachments.
 
-For receipt attachments, use this Edge Function with an HTTP email provider such as Resend, Brevo, or SendGrid. This is more reliable for serverless functions than trying to send direct SMTP mail from the edge runtime.
+Create a separate Google App Password named `CoffeeRealm Edge Functions` so it
+can be revoked without interrupting Supabase Auth. Do not use the normal Gmail
+account password and do not expose the app password to React.

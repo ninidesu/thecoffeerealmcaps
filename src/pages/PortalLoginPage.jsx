@@ -1,4 +1,4 @@
-import { ArrowRight, ChevronDown, Coffee, Eye, EyeOff, KeyRound, Lock, ShieldCheck, UserRound, UsersRound } from 'lucide-react'
+import { ArrowRight, ChevronDown, Coffee, Eye, EyeOff, Lock, ShieldCheck, UserRound, UsersRound } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { normalizeRole, roleRoutes, signInPortal } from '../lib/auth'
@@ -47,7 +47,6 @@ export default function PortalLoginPage() {
       <label htmlFor="portal-role">Role</label><div className="legacy-input"><UsersRound size={19}/><select id="portal-role" value={role} onChange={event => setRole(event.target.value)} required><option value="admin">Admin</option><option value="staff">Operations Staff</option><option value="cashier">Cashier</option></select><ChevronDown size={18}/></div>
       <label htmlFor="portal-identifier">{role === 'staff' ? 'Email or username' : 'Email'}</label><div className="legacy-input"><UserRound size={19}/><input id="portal-identifier" name="identifier" type={role === 'staff' ? 'text' : 'email'} placeholder={role === 'staff' ? 'name@example.com or username' : 'name@example.com'} required autoComplete="username" autoCapitalize="none" spellCheck="false"/></div>
       <label htmlFor="portal-password">Password</label><div className="legacy-input"><Lock size={19}/><input id="portal-password" name="password" type={showPassword ? 'text' : 'password'} placeholder="********" required autoComplete="current-password"/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={19}/> : <Eye size={19}/>}</button></div>
-      {role === 'admin' && <><label htmlFor="portal-pin">Admin PIN</label><div className="legacy-input"><KeyRound size={19}/><input id="portal-pin" name="adminPin" type="password" placeholder="Optional in Supabase auth" inputMode="numeric" pattern="[0-9]{0,10}" maxLength="10" autoComplete="one-time-code"/></div></>}
       {message ? <p className="portal-message portal-message-error">{message}</p> : null}
       <button className="legacy-sign-in" type="submit" disabled={loading}><span>{loading ? 'Signing in...' : 'Sign In'}</span><ArrowRight size={19}/></button>
     </form></main>

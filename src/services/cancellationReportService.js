@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 const FETCH_CAP = 5000
 
 const REPORT_SELECT = `id,order_number,receipt_number,order_type,order_source,status,customer_id,customer_name,customer_email,customer_phone,
-  subtotal,discount_amount,delivery_fee,final_total,payment_status,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
+  subtotal,discount_amount,delivery_fee,final_total,payment_status,cancellation_status,cancellation_requested_at,cancellation_requested_by_role,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
   refund_status,is_voided,voided_reason,voided_at,cashier_id,created_at,updated_at,
   order_items(id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),
   payments(id,method,status,reference_number,amount_due,amount_received,change_amount,paid_at,confirmed_at),
@@ -25,6 +25,7 @@ export const ORDER_TYPE_LABEL = {
 }
 
 export const REFUND_STATUS_LABEL = {
+  pending_review: 'Payment Review',
   pending: 'Pending',
   processing: 'Processing',
   processed: 'Completed',
@@ -47,6 +48,7 @@ function normalizeRefundStatus(row, refunds) {
   const raw = String(row.refund_status || '').toLowerCase()
   if (statuses.includes('processed') || statuses.includes('completed') || raw === 'processed' || raw === 'completed') return 'processed'
   if (statuses.includes('processing') || raw === 'processing') return 'processing'
+  if (raw === 'pending_review') return 'pending_review'
   if (statuses.includes('pending') || raw === 'pending') return 'pending'
   if (statuses.some((status) => status === 'failed' || status === 'rejected') || raw === 'failed' || raw === 'rejected') return 'failed'
   return 'not_applicable'
@@ -61,7 +63,7 @@ function normalizeCancelledByRole(value, isVoided) {
 
 function eventDate(row, refunds) {
   const refundDates = refunds.flatMap((refund) => [refund.processedAt, refund.requestedAt]).filter(Boolean)
-  const dates = [row.cancelled_at, row.voided_at, ...refundDates, row.updated_at, row.created_at]
+  const dates = [row.cancellation_requested_at, row.cancelled_at, row.voided_at, ...refundDates, row.updated_at, row.created_at]
     .filter(Boolean)
     .map((value) => new Date(value))
     .filter((date) => !Number.isNaN(date.getTime()))
@@ -88,7 +90,7 @@ function normalize(row, staffNames = {}, cancellationByOrder = {}) {
     .filter((refund) => ['processed', 'completed'].includes(String(refund.status || '').toLowerCase()))
     .reduce((total, refund) => total + refund.amount, 0)
   const latestRefund = [...refunds].sort((a, b) => new Date(b.processedAt || b.requestedAt || 0) - new Date(a.processedAt || a.requestedAt || 0))[0]
-  const cancelledByKey = normalizeCancelledByRole(cancellationAudit?.cancelled_by_role || row.cancelled_by_role, row.is_voided)
+  const cancelledByKey = normalizeCancelledByRole(cancellationAudit?.cancelled_by_role || row.cancelled_by_role || row.cancellation_requested_by_role, row.is_voided)
 
   const record = {
     id: row.id,
@@ -115,9 +117,14 @@ function normalize(row, staffNames = {}, cancellationByOrder = {}) {
     cancellationNotes: cancellationAudit?.cancellation_notes || row.cancellation_notes || '',
     cancelledByKey,
     cancelledBy: staffNames[cancellationAudit?.cancelled_by] || staffNames[row.cashier_id] || startCase(cancelledByKey) || 'System',
-    cancelledAt: cancellationAudit?.created_at || row.cancelled_at || row.voided_at,
+    cancelledAt: cancellationAudit?.created_at || row.cancellation_requested_at || row.cancelled_at || row.voided_at,
     refundStatus,
     refundAmount: completedRefundAmount,
+    refundDisplayAmount: Number(latestRefund?.amount || completedRefundAmount || 0),
+    refundMethod: latestRefund?.method || '',
+    refundReference: latestRefund?.referenceNumber || '',
+    refundRequestedAt: latestRefund?.requestedAt || null,
+    refundProcessedAt: latestRefund?.processedAt || null,
     refunds,
     items: (row.order_items || []).map((item) => ({
       id: item.id,
@@ -148,7 +155,7 @@ export async function fetchCancellationReportRecords() {
   const { data, error } = await supabase
     .from('orders')
     .select(REPORT_SELECT)
-    .or('status.eq.Cancelled,refund_status.in.(pending,processing,processed,completed,failed,rejected),is_voided.eq.true')
+    .or('status.eq.Cancelled,refund_status.in.(pending_review,pending,processing,processed,completed,failed,rejected),is_voided.eq.true')
     .order('updated_at', { ascending: false })
     .limit(FETCH_CAP)
   if (error) throw error
@@ -275,7 +282,143 @@ export function buildCancellationTrend(records, from, to, granularity = 'day') {
   return points
 }
 
-export function printCancellationReport({ records, summary, rangeLabel }) {
+function printRefundReport({ records, summary, rangeLabel }) {
+  const reportWindow = window.open('', '_blank', 'width=980,height=900')
+  if (!reportWindow) return false
+  const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]))
+  const rows = records.map((record) => `<tr>
+    <td>${escape(record.orderNumber)}</td><td>${escape(record.customerName)}</td><td>${escape(PAYMENT_LABEL[record.paymentMethod] || record.paymentMethod)}</td>
+    <td>PHP ${record.refundDisplayAmount.toFixed(2)}</td><td>${escape(REFUND_STATUS_LABEL[record.refundStatus] || record.refundStatus)}</td>
+    <td>${escape(record.refundMethod || 'Not recorded')}</td><td>${escape(record.refundReference || 'Not provided')}</td><td>${escape(new Date(record.refundProcessedAt || record.refundRequestedAt || record.eventDate).toLocaleString('en-PH'))}</td>
+  </tr>`).join('')
+  reportWindow.document.write(`<!doctype html><html><head><title>Refunds Report</title><style>
+    body{font-family:Arial,sans-serif;color:#1b2f22;padding:32px}h1{margin-bottom:4px}p{color:#68736b}section{display:flex;gap:16px;margin:24px 0}
+    article{border:1px solid #dfe4dd;border-radius:12px;padding:14px;flex:1}article span{font-size:11px;color:#68736b;text-transform:uppercase}article b{display:block;font-size:20px;margin-top:8px}
+    table{width:100%;border-collapse:collapse;font-size:11px}th,td{padding:9px;border-bottom:1px solid #dfe4dd;text-align:left}th{background:#f5f7f3;text-transform:uppercase}
+  </style></head><body><h1>thecoffeerealm - Refunds Report</h1><p>${escape(rangeLabel)} - Generated ${escape(new Date().toLocaleString('en-PH'))}</p>
+    <section><article><span>Refund records</span><b>${summary.total}</b></article><article><span>Needs action</span><b>${summary.needsAction}</b></article><article><span>Completed</span><b>${summary.completed}</b></article><article><span>Amount completed</span><b>PHP ${summary.completedAmount.toFixed(2)}</b></article></section>
+    <table><thead><tr><th>Order</th><th>Customer</th><th>Payment</th><th>Refund</th><th>Status</th><th>Method</th><th>Reference</th><th>Date</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No refund records in this period.</td></tr>'}</tbody></table></body></html>`)
+  reportWindow.document.close()
+  reportWindow.focus()
+  reportWindow.print()
+  return true
+}
+
+function safeDate(value) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
+  anchor.click()
+  window.setTimeout(() => { anchor.remove(); URL.revokeObjectURL(url) }, 1000)
+}
+
+const cancellationReportColumns = [
+  { label: 'Order Number', value: (record) => record.orderNumber || '' },
+  { label: 'Customer', value: (record) => record.customerName || '' },
+  { label: 'Order Type', value: (record) => ORDER_TYPE_LABEL[record.orderType] || record.orderType || '' },
+  { label: 'Payment Method', value: (record) => PAYMENT_LABEL[record.paymentMethod] || record.paymentMethod || '' },
+  { label: 'Original Amount', value: (record) => Number(record.originalAmount || 0), money: true },
+  { label: 'Reason', value: (record) => record.cancellationReason || 'Not specified' },
+  { label: 'Cancelled By', value: (record) => record.cancelledBy || 'System' },
+  { label: 'Event Date', value: (record) => safeDate(record.eventDate) || '', date: true },
+]
+
+const refundReportColumns = [
+  { label: 'Order Number', value: (record) => record.orderNumber || '' },
+  { label: 'Customer', value: (record) => record.customerName || '' },
+  { label: 'Payment Method', value: (record) => PAYMENT_LABEL[record.paymentMethod] || record.paymentMethod || '' },
+  { label: 'Refund Amount', value: (record) => Number(record.refundDisplayAmount || 0), money: true },
+  { label: 'Status', value: (record) => REFUND_STATUS_LABEL[record.refundStatus] || record.refundStatus || 'Not recorded' },
+  { label: 'Refund Method', value: (record) => record.refundMethod || 'Not recorded' },
+  { label: 'Reference', value: (record) => record.refundReference || 'Not provided' },
+  { label: 'Event Date', value: (record) => safeDate(record.refundProcessedAt || record.refundRequestedAt || record.eventDate) || '', date: true },
+]
+
+function reportDefinition(view) {
+  return view === 'refunds'
+    ? { label: 'Refunds', title: 'COFFEE REALM - REFUNDS REPORT', sheet: 'Refund Ledger', columns: refundReportColumns }
+    : { label: 'Cancellations', title: 'COFFEE REALM - CANCELLATIONS REPORT', sheet: 'Cancellation Ledger', columns: cancellationReportColumns }
+}
+
+export async function exportCancellationReportToXlsx({ records = [], summary = {}, rangeLabel = 'Selected period', view = 'cancellations', generatedBy = 'Coffee Realm' }) {
+  const { default: ExcelJS } = await import('exceljs')
+  const definition = reportDefinition(view)
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = generatedBy
+  workbook.created = new Date()
+  const brand = '1E3932'
+  const softGreen = 'EAF2EC'
+  const border = { style: 'thin', color: { argb: 'D9E4DB' } }
+  const summarySheet = workbook.addWorksheet('Summary', { views: [{ showGridLines: false }] })
+  summarySheet.mergeCells('A1:F1')
+  const title = summarySheet.getCell('A1')
+  title.value = definition.title
+  title.font = { bold: true, size: 16, color: { argb: 'FFFFFF' } }
+  title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brand } }
+  title.alignment = { vertical: 'middle' }
+  summarySheet.getRow(1).height = 30
+  summarySheet.getCell('A3').value = 'Report period'; summarySheet.getCell('B3').value = rangeLabel
+  summarySheet.getCell('D3').value = 'Generated'; summarySheet.getCell('E3').value = new Date(); summarySheet.getCell('E3').numFmt = 'mmm d, yyyy h:mm AM/PM'
+  summarySheet.getCell('A4').value = 'Generated by'; summarySheet.getCell('B4').value = generatedBy
+  const summaryRows = view === 'refunds'
+    ? [['Refund records', Number(summary.total || records.length)], ['Needs action', Number(summary.needsAction || 0)], ['Completed refunds', Number(summary.completed || 0)], ['Amount completed', Number(summary.completedAmount || 0)], ['Failed or rejected', Number(summary.failed || 0)]]
+    : [['Cancelled orders', Number(summary.cancelledOrders || 0)], ['Refunded orders', Number(summary.refundedOrders || 0)], ['Cancelled order value', Number(summary.cancelledValue || 0)], ['Most common reason', summary.commonReason || 'No cancellations yet']]
+  summarySheet.mergeCells('A6:B6')
+  const summaryHeader = summarySheet.getCell('A6'); summaryHeader.value = `${definition.label} Summary`; summaryHeader.font = { bold: true, color: { argb: 'FFFFFF' }}; summaryHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brand } }
+  summaryRows.forEach(([label, value], index) => {
+    const row = summarySheet.getRow(index + 7); row.getCell(1).value = label; row.getCell(2).value = value
+    row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: softGreen } }; row.getCell(1).font = { bold: true, color: { argb: brand } }
+    row.getCell(1).border = { top: border, bottom: border, left: border }; row.getCell(2).border = { top: border, bottom: border, right: border }
+    if (['Amount completed', 'Cancelled order value'].includes(label)) row.getCell(2).numFmt = '₱#,##0.00'; else if (typeof value === 'number') row.getCell(2).numFmt = '#,##0'
+  })
+  summarySheet.columns = [{ width: 25 }, { width: 25 }, { width: 4 }, { width: 20 }, { width: 24 }, { width: 4 }]
+  const ledger = workbook.addWorksheet(definition.sheet, { views: [{ state: 'frozen', ySplit: 4 }] })
+  const lastColumn = String.fromCharCode(64 + definition.columns.length)
+  ledger.mergeCells(`A1:${lastColumn}1`)
+  const ledgerTitle = ledger.getCell('A1'); ledgerTitle.value = definition.title.replace('REPORT', 'LEDGER'); ledgerTitle.font = { bold: true, size: 15, color: { argb: 'FFFFFF' }}; ledgerTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brand }}; ledgerTitle.alignment = { vertical: 'middle' }; ledger.getRow(1).height = 28
+  ledger.getCell('A2').value = `Report period: ${rangeLabel}`; ledger.getCell('A3').value = `Generated ${new Date().toLocaleString('en-PH')} by ${generatedBy}`
+  const headerRow = ledger.getRow(4); headerRow.values = definition.columns.map((column) => column.label); headerRow.height = 22
+  headerRow.eachCell((cell) => { cell.font = { bold: true, color: { argb: 'FFFFFF' }, size: 10 }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brand } }; cell.alignment = { vertical: 'middle', horizontal: 'center' } })
+  records.forEach((record, index) => {
+    const row = ledger.getRow(index + 5); row.values = definition.columns.map((column) => column.value(record))
+    row.eachCell((cell) => { cell.border = { bottom: border }; cell.alignment = { vertical: 'middle', wrapText: true }; if (index % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F7FAF8' } } })
+    definition.columns.forEach((column, columnIndex) => { const cell = row.getCell(columnIndex + 1); if (column.date) cell.numFmt = 'mmm d, yyyy h:mm AM/PM'; if (column.money) cell.numFmt = '₱#,##0.00' })
+  })
+  ledger.autoFilter = { from: 'A4', to: `${lastColumn}${Math.max(4, records.length + 4)}` }
+  ledger.columns = definition.columns.map((column) => ({ width: column.money ? 17 : column.date ? 22 : column.label === 'Reason' ? 32 : 20 }))
+  const buffer = await workbook.xlsx.writeBuffer()
+  const slug = view === 'refunds' ? 'refunds' : 'cancellations'
+  downloadBlob(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `coffee-realm-${slug}-report-${new Date().toISOString().slice(0, 10)}.xlsx`)
+}
+
+export async function exportCancellationReportToPdf({ records = [], summary = {}, rangeLabel = 'Selected period', view = 'cancellations', generatedBy = 'Coffee Realm' }) {
+  const { jsPDF } = await import('jspdf')
+  const definition = reportDefinition(view)
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' })
+  const pageWidth = pdf.internal.pageSize.getWidth(); const pageHeight = pdf.internal.pageSize.getHeight(); const green = [30, 57, 50]; const softGreen = [234, 242, 236]
+  const moneyValue = (value) => `PHP ${Number(value || 0).toFixed(2)}`; const cellText = (value, width) => pdf.splitTextToSize(String(value == null || value === '' ? '—' : value), width)[0]
+  const metrics = view === 'refunds' ? [['Refund records', summary.total || records.length], ['Needs action', summary.needsAction || 0], ['Completed', summary.completed || 0], ['Amount completed', moneyValue(summary.completedAmount)]] : [['Cancelled orders', summary.cancelledOrders || 0], ['Refunded orders', summary.refundedOrders || 0], ['Cancelled value', moneyValue(summary.cancelledValue)], ['Common reason', summary.commonReason || 'None']]
+  const drawHeader = (pageLabel) => { pdf.setFillColor(...green); pdf.rect(0, 0, pageWidth, 54, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.text(definition.title, 38, 34); pdf.setTextColor(...green); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text(pageLabel, 38, 76); pdf.setTextColor(70, 85, 76); pdf.text(`Generated ${new Date().toLocaleString('en-PH')} by ${generatedBy}`, 38, 91) }
+  drawHeader(`Report period: ${rangeLabel}`)
+  metrics.forEach(([label, value], index) => { const x = 38 + index * 180; pdf.setFillColor(...softGreen); pdf.roundedRect(x, 112, 164, 46, 7, 7, 'F'); pdf.setTextColor(80, 100, 88); pdf.setFontSize(7); pdf.text(String(label).toUpperCase(), x + 10, 128); pdf.setTextColor(...green); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.text(cellText(value, 144), x + 10, 146) })
+  const tableX = 38; const tableWidth = pageWidth - 76; const columnWidth = tableWidth / definition.columns.length; let y = 190
+  const drawTableHeader = () => { pdf.setFillColor(...green); pdf.rect(tableX, y, tableWidth, 20, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); definition.columns.forEach((column, index) => pdf.text(column.label.toUpperCase(), tableX + index * columnWidth + 5, y + 13)); y += 20 }
+  drawTableHeader()
+  records.forEach((record, index) => { if (y > pageHeight - 40) { pdf.addPage(); y = 78; drawHeader(`${definition.label} ledger - page ${pdf.getNumberOfPages()}`); y = 104; drawTableHeader() }; if (index % 2 === 1) { pdf.setFillColor(247, 250, 248); pdf.rect(tableX, y, tableWidth, 24, 'F') }; pdf.setTextColor(37, 58, 46); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); definition.columns.forEach((column, columnIndex) => { const raw = column.value(record); const value = column.date ? (safeDate(raw)?.toLocaleDateString('en-PH') || '—') : column.money ? moneyValue(raw) : raw; pdf.text(cellText(value, columnWidth - 10), tableX + columnIndex * columnWidth + 5, y + 15) }); pdf.setDrawColor(222, 231, 224); pdf.line(tableX, y + 24, tableX + tableWidth, y + 24); y += 24 })
+  const slug = view === 'refunds' ? 'refunds' : 'cancellations'
+  downloadBlob(pdf.output('blob'), `coffee-realm-${slug}-report-${new Date().toISOString().slice(0, 10)}.pdf`)
+}
+
+export function printCancellationReport({ records, summary, rangeLabel, view = 'cancellations' }) {
+  if (view === 'refunds') return printRefundReport({ records, summary, rangeLabel })
   const reportWindow = window.open('', '_blank', 'width=980,height=900')
   if (!reportWindow) return false
   const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]))

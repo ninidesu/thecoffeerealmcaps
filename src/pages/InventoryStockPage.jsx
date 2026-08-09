@@ -6,18 +6,17 @@ import {
 import AppShell from '../components/AppShell'
 import { describeError } from '../utils/describeError'
 import {
-  fetchIngredients, fetchFinishedProducts, fetchSupplies, fetchMenuItemOptions,
+  fetchIngredients, fetchFinishedProducts, fetchMenuItemOptions,
   fetchMovements, fetchRecipeUsage,
-  upsertIngredient, archiveIngredient, upsertFinishedProduct, archiveFinishedProduct,
-  upsertSupply, archiveSupply, adjustStock,
+  upsertIngredient, archiveIngredient, upsertFinishedProduct, archiveFinishedProduct, adjustStock,
 } from '../services/opsInventoryService'
 import { getCurrentPortalSession } from '../lib/auth'
 import { fetchStaffPreferences, getRememberedStaffFilters, rememberStaffFilters, shouldShowSystemNotification } from '../services/staffSettingsService'
+import { useManagementSessionState } from '../hooks/useManagementSessionState'
 
 const ENTITY_CONFIGS = {
   ingredient: { key: 'ingredient', label: 'Ingredients', singular: 'Ingredient', fetch: fetchIngredients, upsert: upsertIngredient, archive: archiveIngredient, hasType: true },
   finished_product: { key: 'finished_product', label: 'Products', singular: 'Product', fetch: fetchFinishedProducts, upsert: upsertFinishedProduct, archive: archiveFinishedProduct, hasType: false, hasMenuLink: true },
-  supply: { key: 'supply', label: 'Supplies', singular: 'Supply', fetch: fetchSupplies, upsert: upsertSupply, archive: archiveSupply, hasType: false },
 }
 const PAGE_SIZE = 25
 
@@ -70,10 +69,10 @@ export default function InventoryStockPage() {
   const [filtersReady, setFiltersReady] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState('')
 
-  const [formTarget, setFormTarget] = useState(null)
-  const [drawerItem, setDrawerItem] = useState(null)
-  const [adjustTarget, setAdjustTarget] = useState(null)
-  const [archiveTarget, setArchiveTarget] = useState(null)
+  const [formTarget, setFormTarget] = useManagementSessionState('staff:inventory:item-form', null)
+  const [drawerItem, setDrawerItem] = useManagementSessionState('staff:inventory:drawer', null)
+  const [adjustTarget, setAdjustTarget] = useManagementSessionState('staff:inventory:adjustment', null)
+  const [archiveTarget, setArchiveTarget] = useManagementSessionState('staff:inventory:archive-confirmation', null)
 
   const config = ENTITY_CONFIGS[activeEntity]
 
@@ -86,7 +85,8 @@ export default function InventoryStockPage() {
         const preferences = await fetchStaffPreferences(profile.id)
         if (!active) return
         const remembered = getRememberedStaffFilters('inventory')
-        setActiveEntity(remembered?.activeEntity || preferences.inventory_tab)
+        const savedEntity = remembered?.activeEntity || preferences.inventory_tab
+        setActiveEntity(savedEntity === 'finished_product' ? 'finished_product' : 'ingredient')
         setStatusFilter(remembered?.statusFilter || preferences.inventory_filter)
         setPageSize(preferences.rows_per_page)
         if (remembered) {
@@ -185,8 +185,10 @@ export default function InventoryStockPage() {
       setItems((current) => current.map((i) => (i.id === target.item.id ? { ...i, quantity: Number(nextQty) } : i)))
       pushToast('success', `${target.item.name} updated to ${formatQty(nextQty)} ${target.item.unit}.`)
       setAdjustTarget(null)
+      return true
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not adjust stock.'))
+      return false
     } finally {
       setBusyId('')
     }
@@ -195,11 +197,10 @@ export default function InventoryStockPage() {
   const attentionCount = outCount + lowCount
 
   return (
-    <AppShell role="staff" title="Inventory Stock Overview" titleActions={
+    <AppShell role="staff" title="Inventory Stock Overview" onRefresh={() => load(activeEntity)} titleActions={
       <div className="ops-order-view-toggle" role="tablist" aria-label="Inventory type">
         <button type="button" role="tab" aria-selected={activeEntity === 'ingredient'} className={activeEntity === 'ingredient' ? 'active' : ''} onClick={() => setActiveEntity('ingredient')}>Ingredients</button>
         <button type="button" role="tab" aria-selected={activeEntity === 'finished_product'} className={activeEntity === 'finished_product' ? 'active' : ''} onClick={() => setActiveEntity('finished_product')}>Products</button>
-        <button type="button" role="tab" aria-selected={activeEntity === 'supply'} className={activeEntity === 'supply' ? 'active' : ''} onClick={() => setActiveEntity('supply')}>Supplies</button>
       </div>
     } actions={
       <div className="ops-header-actions">
@@ -371,7 +372,8 @@ function RowActions({ item, busy, menuOpen, onToggleMenu, onView, onAdd, onDeduc
 }
 
 function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
-  const [values, setValues] = useState({
+  const draftScope = `staff:inventory:${config.key}:${item?.id || 'new'}:draft`
+  const [values, setValues, clearValues] = useManagementSessionState(draftScope, {
     name: item?.name || '', category: item?.category || '', type: item?.type || 'other', unit: item?.unit || '',
     minStockLevel: item?.minStockLevel ?? 10, highStockLevel: item?.highStockLevel ?? (config.key === 'ingredient' ? 500 : 100),
     supplier: item?.supplier || '', notes: item?.notes || '', initialQuantity: item ? item.quantity : 0,
@@ -380,6 +382,7 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const set = (key, value) => setValues((c) => ({ ...c, [key]: value }))
+  const close = () => { clearValues(); onClose() }
 
   const submit = async (event) => {
     event.preventDefault()
@@ -398,6 +401,7 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
     setSaving(true); setError('')
     try {
       await onSave({ id: item?.id, ...values, menuItemId: values.saleMappings[0]?.menuItemId || null, minStockLevel: min, highStockLevel: high, initialQuantity: Number(values.initialQuantity) })
+      clearValues()
     } catch (cause) {
       setError(describeError(cause, 'Could not save this item.'))
       setSaving(false)
@@ -405,9 +409,9 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
   }
 
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onClose() }}>
-      <section className="payment-modal inv-form-modal" role="dialog" aria-modal="true" aria-labelledby="inv-form-title" aria-describedby="inv-form-description">
-        <button className="payment-modal-close" type="button" onClick={onClose} disabled={saving} aria-label="Close">×</button>
+    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) close() }}>
+      <section className={`payment-modal inv-form-modal inv-form-modal-${config.key}`} role="dialog" aria-modal="true" aria-labelledby="inv-form-title" aria-describedby="inv-form-description">
+        <button className="payment-modal-close" type="button" onClick={close} disabled={saving} aria-label="Close">×</button>
         <header className="inv-form-header"><span className="inv-form-icon"><Package size={20} /></span><div><span>{item ? `Editing ${config.singular.toLowerCase()}` : `New ${config.singular.toLowerCase()}`}</span><h2 id="inv-form-title">{item ? item.name : `Add ${config.singular.toLowerCase()} stock`}</h2><p id="inv-form-description">{config.key === 'finished_product' ? 'Set the stock unit, then define how each menu format uses this product.' : 'Add the item details, stock levels, and replenishment thresholds.'}</p></div></header>
         <form className="inv-record-form" onSubmit={submit}>
           <section className="inv-form-section"><header><h3>Item details</h3><p>How this item will appear in inventory.</p></header><div className="form-grid">
@@ -447,7 +451,7 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
           )}
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions inv-form-actions">
-            <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+            <button className="secondary-button" type="button" onClick={close} disabled={saving}>Cancel</button>
             <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
           </div>
         </form>
@@ -458,20 +462,23 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
 
 function AdjustStockModal({ target, busy, onClose, onConfirm }) {
   const { item } = target
-  const [direction, setDirection] = useState(target.mode === 'deduction' ? 'deduction' : 'restock')
-  const [movementType, setMovementType] = useState(target.mode === 'deduction' ? 'deduction' : 'restock')
-  const [amount, setAmount] = useState('')
-  const [reason, setReason] = useState('')
-  const [reference, setReference] = useState('')
+  const draftScope = `staff:inventory:${item.id}:adjustment-draft`
+  const [direction, setDirection, clearDirection] = useManagementSessionState(`${draftScope}:direction`, target.mode === 'deduction' ? 'deduction' : 'restock')
+  const [movementType, setMovementType, clearMovementType] = useManagementSessionState(`${draftScope}:type`, target.mode === 'deduction' ? 'deduction' : 'restock')
+  const [amount, setAmount, clearAmount] = useManagementSessionState(`${draftScope}:amount`, '')
+  const [reason, setReason, clearReason] = useManagementSessionState(`${draftScope}:reason`, '')
+  const [reference, setReference, clearReference] = useManagementSessionState(`${draftScope}:reference`, '')
   const [error, setError] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const clearDraft = () => { clearDirection(); clearMovementType(); clearAmount(); clearReason(); clearReference() }
+  const close = () => { clearDraft(); onClose() }
 
   const numericAmount = Number(amount)
   const validAmount = amount !== '' && !Number.isNaN(numericAmount) && numericAmount > 0
   const resulting = validAmount ? item.quantity + (direction === 'restock' ? numericAmount : -numericAmount) : null
   const wouldGoNegative = resulting !== null && resulting < 0
 
-  useEffect(() => { setMovementType(direction === 'restock' ? 'restock' : 'deduction') }, [direction])
+  useEffect(() => { setMovementType(direction === 'restock' ? 'restock' : 'deduction') }, [direction, setMovementType])
 
   const submit = (event) => {
     event.preventDefault()
@@ -496,7 +503,7 @@ function AdjustStockModal({ target, busy, onClose, onConfirm }) {
           <p><b>Reason:</b> {reason}{reference ? ` — Ref: ${reference}` : ''}</p>
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={() => setConfirming(false)} disabled={busy}>Go back</button>
-            <button className="primary-button" type="button" disabled={busy} onClick={() => onConfirm({ delta: direction === 'restock' ? numericAmount : -numericAmount, movementType, reason: reference ? `${reason} — Ref: ${reference}` : reason })}>
+            <button className="primary-button" type="button" disabled={busy} onClick={async () => { if (await onConfirm({ delta: direction === 'restock' ? numericAmount : -numericAmount, movementType, reason: reference ? `${reason} — Ref: ${reference}` : reason })) clearDraft() }}>
               {busy ? 'Saving…' : 'Confirm'}
             </button>
           </div>
@@ -506,9 +513,9 @@ function AdjustStockModal({ target, busy, onClose, onConfirm }) {
   }
 
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
+    <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) close() }}>
       <section className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="inv-adjust-title">
-        <button className="payment-modal-close" type="button" onClick={onClose} aria-label="Close">×</button>
+        <button className="payment-modal-close" type="button" onClick={close} aria-label="Close">×</button>
         <span className="payment-modal-kicker">Stock adjustment</span>
         <h2 id="inv-adjust-title">{item.name}</h2>
         <form onSubmit={submit}>
@@ -536,7 +543,7 @@ function AdjustStockModal({ target, busy, onClose, onConfirm }) {
           )}
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
-            <button className="secondary-button" type="button" onClick={onClose}>Cancel</button>
+            <button className="secondary-button" type="button" onClick={close}>Cancel</button>
             <button className="primary-button" type="submit">Review</button>
           </div>
         </form>

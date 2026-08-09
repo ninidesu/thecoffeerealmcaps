@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, Clock, Facebook, Instagram, Mail, MapPin, MessageCircle, Phone, Star } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowRight, ChevronDown, Clock, Facebook, Instagram, Mail, MapPin, MessageCircle, Phone, Star } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import Brand from '../components/Brand'
@@ -9,12 +9,9 @@ import HowOrderingWorks from '../components/HowOrderingWorks'
 import { store } from '../data/mockData'
 import { bestSellerItems } from '../data/bestSellers'
 import { useProductCustomization } from '../hooks/useProductCustomization'
-
-const reviews = [
-  { name: 'Mika S.', quote: 'Their coffee and cheesecakes feel homemade in the best way. Cozy place, kind staff, and always worth coming back to.' },
-  { name: 'Ari R.', quote: 'The cookie boxes are my go-to gift. Every flavor tastes fresh and the packaging feels thoughtful.' },
-  { name: 'Nico C.', quote: 'Perfect North Fairview coffee stop. Good drinks, comforting meals, and a calm spot to work or meet friends.' },
-]
+import { submitCustomerMessage } from '../services/customerMessageService'
+import { CONTENT_DEFAULTS, DEFAULT_TESTIMONIALS, SYSTEM_DEFAULTS, fetchPublicPortalData } from '../services/adminPortalConfigurationService'
+import { fetchMenuCatalog } from '../services/menuService'
 
 const mapEmbed = 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3859.0124735474096!2d121.05181751066577!3d14.711886674283116!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397b1c4be33d913%3A0x2ab4591abe2ac00a!2sThe%20Coffee%20Realm%20-%20North%20Fairview!5e0!3m2!1sen!2sph!4v1764156842113!5m2!1sen!2sph'
 
@@ -45,6 +42,61 @@ export default function HomePage() {
   const [activeLayer, setActiveLayer] = useState(0)
   const [layerSources, setLayerSources] = useState([HERO_VIDEOS[0], HERO_VIDEOS[1]])
   const [activeCakeSlide, setActiveCakeSlide] = useState(0)
+  const [inquiryType, setInquiryType] = useState('general')
+  const [preorderStatus, setPreorderStatus] = useState({ kind: '', message: '' })
+  const [submittingPreorder, setSubmittingPreorder] = useState(false)
+  const [portalData, setPortalData] = useState({ content: CONTENT_DEFAULTS, system: SYSTEM_DEFAULTS, testimonials: DEFAULT_TESTIMONIALS })
+  const [menuCatalog, setMenuCatalog] = useState([])
+  const content = portalData.content
+  const publicStore = { ...store, ...portalData.system.store }
+  const featuredItems = useMemo(() => {
+    const selected = (content.featured.itemIds || []).map(String)
+    if (!selected.length || !menuCatalog.length) return bestSellerItems
+    const byId = new Map(menuCatalog.map((item) => [String(item.id), item]))
+    return selected.map((id) => byId.get(id)).filter(Boolean)
+  }, [content.featured.itemIds, menuCatalog])
+
+  const submitPreorderInquiry = async (event) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const values = Object.fromEntries(new FormData(form))
+    const selectedType = values.inquiry_type || inquiryType
+    const category = selectedType === 'pre_order' ? 'pre_order' : selectedType === 'report' ? 'help_request' : 'general_inquiry'
+    const subject = selectedType === 'report' ? 'Report' : selectedType === 'pre_order' ? 'Pre-order inquiry' : 'General inquiry'
+    setSubmittingPreorder(true)
+    setPreorderStatus({ kind: '', message: '' })
+    try {
+      await submitCustomerMessage({
+        category,
+        source: 'landing',
+        name: values.name,
+        email: values.email,
+        phone: values.phone,
+        subject,
+        message: values.message,
+        inquiryType: selectedType,
+        preferredDate: selectedType === 'pre_order' ? values.preferred_date : null,
+        quantity: selectedType === 'pre_order' ? values.quantity : null,
+      })
+      form.reset()
+      setInquiryType('general')
+      setPreorderStatus({ kind: 'success', message: 'Your message was sent. Our team will reply by email after reviewing the details.' })
+    } catch (error) {
+      setPreorderStatus({ kind: 'error', message: error.message || 'Your inquiry could not be sent. Please try again.' })
+    } finally {
+      setSubmittingPreorder(false)
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    Promise.all([fetchPublicPortalData(), fetchMenuCatalog()]).then(([configuration, catalog]) => {
+      if (!active) return
+      setPortalData(configuration)
+      setMenuCatalog(catalog.products || [])
+    }).catch(() => {})
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     const initialVideo = videoRefs.current[0]
@@ -135,12 +187,12 @@ export default function HomePage() {
             animate="show"
             variants={{ hidden: {}, show: { transition: { staggerChildren: 0.12 } } }}
           >
-            <motion.span className="eyebrow" variants={fadeUp}>thecoffeerealm in North Fairview</motion.span>
-            <motion.h1 variants={fadeUp}>Fresh coffee, homemade sweets, and slow little moments.</motion.h1>
-            <motion.p variants={fadeUp}>We serve comforting coffee-based drinks, freshly baked cookies, homemade cakes, pasta, rice meals, toasts, and snacks in a warm neighborhood space.</motion.p>
+            <motion.span className="eyebrow" variants={fadeUp}>{content.hero.eyebrow}</motion.span>
+            <motion.h1 variants={fadeUp}>{content.hero.title}</motion.h1>
+            <motion.p variants={fadeUp}>{content.hero.body}</motion.p>
             <motion.div className="hero-actions" variants={fadeUp}>
-              <Link className="button button-light" to="/menu">View full menu</Link>
-              <a className="text-link" href="#preorder">Send a pre-order inquiry <ArrowRight size={17} /></a>
+              <Link className="button button-light" to={content.hero.primaryHref || '/menu'}>{content.hero.primaryLabel}</Link>
+              <a className="text-link" href={content.hero.secondaryHref || '#customer-inquiry-form'}>{content.hero.secondaryLabel} <ArrowRight size={17} /></a>
             </motion.div>
             <motion.div className="hero-proof" variants={fadeUp}>
               <div className="avatar-stack"><span>TC</span><span>CR</span><span>QC</span></div>
@@ -153,90 +205,98 @@ export default function HomePage() {
           <span>Homemade cakes</span><i>*</i><span>Fresh cookie boxes</span><i>*</i><span>Coffee-based drinks</span><i>*</i><span>North Fairview cafe</span>
         </section>
 
-        <section className="section landing-menu-preview" id="menu">
+        {content.featured.visible && <section className="section landing-menu-preview" id="menu">
           <Reveal tag="div" className="section-heading">
-            <div><span className="eyebrow">Customer favorites</span><h2>Bestsellers from the realm.</h2></div>
+            <div><span className="eyebrow">{content.featured.eyebrow}</span><h2>{content.featured.title}</h2></div>
             <Link className="text-link dark" to="/menu">See full menu <ArrowRight size={17} /></Link>
           </Reveal>
           <Reveal tag="div" delay={0.1}>
-            <BestSellerCarousel items={bestSellerItems} onAddToCart={addToCart} />
+            <BestSellerCarousel items={featuredItems} onAddToCart={addToCart} />
           </Reveal>
-        </section>
+        </section>}
 
-        <section className="landing-preorder" id="preorder">
+        {content.inquiry.visible && <section className="landing-inquiry" id="preorder">
           <motion.div
-            className="preorder-visual"
+            className="inquiry-editorial-panel"
             initial={{ opacity: 0, x: -38 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true, amount: 0.25 }}
             transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
           >
-            <div className="preorder-visual-copy">
-              <span className="preorder-badge">Whole Cakes Available for Pre-Order</span>
-              <p>Please order 2-3 days in advance.</p>
+            <div className="inquiry-editorial-copy">
+              <span className="inquiry-kicker">{content.inquiry.kicker}</span>
+              <h2>{content.inquiry.title}</h2>
+              <div className="inquiry-response-note"><Mail size={18} aria-hidden="true" /><span><b>{content.inquiry.responseTitle}</b><small>{content.inquiry.responseBody}</small></span></div>
             </div>
-            <div className="preorder-slideshow" aria-label="Featured whole cakes for pre-order">
-              {PREORDER_CAKES.map((cake, index) => (
-                <img
-                  key={cake.src}
-                  src={cake.src}
-                  alt={cake.alt}
-                  className={`preorder-slide-image ${activeCakeSlide === index ? 'is-active' : ''}`}
-                />
-              ))}
+            <div className="inquiry-media">
+              <div className="preorder-slideshow" aria-label="Featured whole cakes for pre-order">
+                {PREORDER_CAKES.map((cake, index) => (
+                  <img
+                    key={cake.src}
+                    src={cake.src}
+                    alt={cake.alt}
+                    className={`preorder-slide-image ${activeCakeSlide === index ? 'is-active' : ''}`}
+                  />
+                ))}
+              </div>
+              <div className="inquiry-media-caption"><span>Whole cake pre-orders</span></div>
             </div>
           </motion.div>
-          <Reveal tag="div" className="preorder-copy" delay={0.08} y={26}>
-            <span className="eyebrow">Pre-order and inquiries</span>
-            <h2>Planning a whole cake, cookie box, or coffee run?</h2>
-            <p>Tell us what you need and we'll confirm availability and details.</p>
-            <form className="preorder-form" onSubmit={(event) => event.preventDefault()}>
-              <div>
-                <label>
-                  <span>Inquiry type</span>
-                  <select aria-label="Inquiry type" defaultValue="">
-                    <option value="" disabled>Select inquiry type</option>
-                    <option value="whole-cake">Whole Cake</option>
-                    <option value="cookie-box">Cookie Box</option>
-                    <option value="bulk-coffee-order">Bulk Coffee Order</option>
-                    <option value="other">Other</option>
+          <Reveal tag="div" className="inquiry-form-panel" id="customer-inquiry-form" delay={0.08} y={26}>
+            <header className="inquiry-form-heading"><span>Customer inquiry</span><h2>Send a message</h2><p>Share the essentials below. Fields marked with an asterisk are required.</p></header>
+            <form className="preorder-form inquiry-form" onSubmit={submitPreorderInquiry}>
+              <label className="inquiry-select-field">
+                <span>Inquiry type *</span>
+                <span className="inquiry-select-shell">
+                  <select name="inquiry_type" value={inquiryType} onChange={(event) => { setInquiryType(event.target.value); setPreorderStatus({ kind: '', message: '' }) }} aria-describedby="inquiry-type-help">
+                    <option value="general">General</option>
+                    <option value="pre_order">Pre-order</option>
+                    <option value="report">Report</option>
                   </select>
+                  <ChevronDown size={18} aria-hidden="true" />
+                </span>
+                <small id="inquiry-type-help">{inquiryType === 'pre_order' ? 'Use this for advance orders. We’ll ask for your preferred pickup date and estimated quantity.' : inquiryType === 'report' ? 'Use this to report an issue or concern to our support team.' : 'Use this for questions, feedback, and everything else.'}</small>
+              </label>
+              <div className="preorder-contact-grid">
+                <label>
+                  <span>Full name *</span>
+                  <input name="name" type="text" maxLength="120" autoComplete="name" required placeholder="Your full name" />
                 </label>
                 <label>
-                  <span>Preferred pickup date</span>
-                  <input type="date" aria-label="Preferred pickup date" />
+                  <span>Email address *</span>
+                  <input name="email" type="email" maxLength="254" autoComplete="email" required placeholder="name@example.com" />
+                </label>
+                <label>
+                  <span>Contact number *</span>
+                  <input name="phone" type="tel" maxLength="40" autoComplete="tel" required placeholder="09XXXXXXXXX" />
                 </label>
               </div>
-              <div>
+              {inquiryType === 'pre_order' && <motion.div className="preorder-conditional-fields" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }}>
                 <label>
-                  <span>Estimated quantity or serving size</span>
-                  <input type="text" placeholder="e.g. 1 whole cake or 12-15 pax" aria-label="Estimated quantity or serving size" />
+                  <span>Preferred pickup date *</span>
+                  <input name="preferred_date" type="date" required />
                 </label>
                 <label>
-                  <span>Contact number</span>
-                  <input type="tel" placeholder="09XXXXXXXXX" aria-label="Contact number" />
+                  <span>Estimated quantity or serving size *</span>
+                  <input name="quantity" type="text" maxLength="120" required placeholder="e.g. 1 whole cake or 12–15 pax" />
                 </label>
-              </div>
+                <p className="preorder-lead-time-note"><Clock size={17} aria-hidden="true" /><span>Please order <b>2–3 days ahead</b> for pre-orders or bulk orders.</span></p>
+              </motion.div>}
               <label>
-                <span>Email address</span>
-                <input type="email" placeholder="name@example.com" aria-label="Email address" />
+                <span>Message *</span>
+                <textarea name="message" required maxLength="5000" placeholder={inquiryType === 'pre_order' ? 'Tell us what you would like to order and any important details.' : inquiryType === 'report' ? 'Describe the issue, what happened, and any details that can help us review it.' : 'How can we help?'} />
               </label>
-              <label>
-                <span>Message</span>
-                <textarea placeholder="Tell us the flavor, preferred schedule, and anything else we should prepare for your order." aria-label="Message" />
-              </label>
-              <button type="submit" className="button button-dark">Submit Pre-Order Inquiry</button>
-              <small className="preorder-disclaimer">Submitting this form does not confirm the order. Availability will still be reviewed and verified by the team.</small>
+              {preorderStatus.message && <p className={`message-form-notice is-${preorderStatus.kind}`} role={preorderStatus.kind === 'error' ? 'alert' : 'status'}>{preorderStatus.message}</p>}
+              <div className="inquiry-form-action"><small>{inquiryType === 'pre_order' ? 'Submitting does not confirm the order. Availability will still be reviewed.' : 'We’ll use your email address to send the team’s reply.'}</small><button type="submit" className="button button-dark" disabled={submittingPreorder}>{submittingPreorder ? 'Sending…' : inquiryType === 'pre_order' ? 'Send pre-order request' : inquiryType === 'report' ? 'Send report' : 'Send inquiry'}<ArrowRight size={17} aria-hidden="true" /></button></div>
             </form>
           </Reveal>
-        </section>
+        </section>}
 
         <section className="story landing-about" id="about">
           <Reveal tag="div" className="story-copy">
-            <span className="eyebrow">About us</span>
-            <h2>A cozy place for coffee, cakes, and conversations.</h2>
-            <p>We serve freshly baked cookies, homemade cakes, and comforting coffee-based drinks in a space made for slow days, warm conversations, or solo work dates.</p>
-            <p>We also offer pasta, rice meals, toasts, and snacks. Some bestsellers include homemade tiramisu, biscoff burnt cheesecake, and fresh cookie boxes for gifting or sharing.</p>
+            <span className="eyebrow">{content.about.eyebrow}</span>
+            <h2>{content.about.title}</h2>
+            {(content.about.paragraphs || []).filter(Boolean).map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
           </Reveal>
         </section>
 
@@ -251,8 +311,8 @@ export default function HomePage() {
             viewport={{ once: true, amount: 0.2 }}
             variants={{ hidden: {}, show: { transition: { staggerChildren: 0.12 } } }}
           >
-            {reviews.map((review) => <motion.article className="review-card-react" key={review.name} variants={fadeUp}>
-              <div className="review-stars" aria-label="5 star review"><Star /><Star /><Star /><Star /><Star /></div>
+            {portalData.testimonials.map((review) => <motion.article className="review-card-react" key={review.id || review.name} variants={fadeUp}>
+              <div className="review-stars" aria-label={`${review.rating || 5} star review`}>{Array.from({ length: review.rating || 5 }, (_, index) => <Star key={index}/>)}</div>
               <p>"{review.quote}"</p>
               <b>{review.name}</b>
             </motion.article>)}
@@ -263,7 +323,7 @@ export default function HomePage() {
           <Reveal tag="div" className="map-copy">
             <span className="eyebrow">Visit thecoffeerealm</span>
             <h2>Find us in North Fairview.</h2>
-            <p><MapPin size={18} /> {store.address}</p>
+            <p><MapPin size={18} /> {publicStore.address}</p>
             <p><Clock size={18} /> Weekdays and weekends: 10:00 AM to 12:00 MN</p>
             <a className="button button-dark" href={store.map} target="_blank" rel="noreferrer">Get directions</a>
           </Reveal>
@@ -278,19 +338,19 @@ export default function HomePage() {
       <footer className="landing-footer-react">
         <div>
           <Brand light />
-          <p>Thoughtfully brewed in North Fairview, Quezon City.</p>
+          <p>{content.footer.tagline}</p>
           <ul>
-            <li><Phone size={16} /> {store.phone}</li>
-            <li><Mail size={16} /> <a href={`mailto:${store.email}`}>{store.email}</a></li>
-            <li><MapPin size={16} /> {store.address}</li>
+            <li><Phone size={16} /> {publicStore.phone}</li>
+            <li><Mail size={16} /> <a href={`mailto:${publicStore.email}`}>{publicStore.email}</a></li>
+            <li><MapPin size={16} /> {publicStore.address}</li>
           </ul>
         </div>
         <div>
           <h3>Follow us</h3>
           <div className="footer-social-links">
-            <a href={store.facebook} target="_blank" rel="noreferrer"><Facebook size={18} /> Facebook</a>
-            <a href="https://www.tiktok.com/@thecoffeerealmx" target="_blank" rel="noreferrer"><MessageCircle size={18} /> TikTok</a>
-            <a href={store.instagram} target="_blank" rel="noreferrer"><Instagram size={18} /> Instagram</a>
+            <a href={content.footer.facebookUrl} target="_blank" rel="noreferrer"><Facebook size={18} /> Facebook</a>
+            <a href={content.footer.tiktokUrl} target="_blank" rel="noreferrer"><MessageCircle size={18} /> TikTok</a>
+            <a href={content.footer.instagramUrl} target="_blank" rel="noreferrer"><Instagram size={18} /> Instagram</a>
           </div>
         </div>
         <div>

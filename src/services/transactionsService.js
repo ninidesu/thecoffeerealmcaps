@@ -1,8 +1,9 @@
 import { supabase } from '../lib/supabase'
+import { dispatchOrderEmails } from './orderEmailService'
 
 const LIST_SELECT = `id,order_number,receipt_number,order_type,order_source,status,customer_id,customer_name,customer_email,customer_phone,
   delivery_address,schedule_date,schedule_time,subtotal,discount_type,discount_amount,delivery_fee,final_total,
-  payment_status,payment_confirmed,payment_proof_path,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
+  payment_status,payment_confirmed,payment_proof_path,cancellation_status,fulfillment_hold,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
   refund_status,is_voided,voided_reason,voided_at,cashier_id,created_at,updated_at,
   order_items(id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),
   payments!inner(id,method,status,amount_due,amount_received,change_amount,reference_number,account_number,bank_name,paid_at,confirmed_at),
@@ -14,7 +15,7 @@ const SUMMARY_SELECT = `id,order_type,order_source,status,customer_id,final_tota
 
 const DETAIL_SELECT = `id,order_number,receipt_number,order_type,order_source,status,customer_id,customer_name,customer_email,customer_phone,
   delivery_address,schedule_date,schedule_time,subtotal,discount_type,discount_amount,delivery_fee,final_total,
-  payment_status,payment_confirmed,payment_proof_path,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
+  payment_status,payment_confirmed,payment_proof_path,cancellation_status,fulfillment_hold,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
   refund_status,is_voided,voided_reason,voided_at,cashier_id,created_at,updated_at,
   order_items(id,menu_item_id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),
   payments!inner(id,method,status,amount_due,amount_received,change_amount,reference_number,account_number,bank_name,paid_at,confirmed_at),
@@ -54,6 +55,8 @@ function normalize(row, cashierNames = {}) {
     paymentRecordStatus: payment?.status || row.payment_status || '',
     paymentConfirmed: Boolean(row.payment_confirmed),
     paymentProofPath: row.payment_proof_path,
+    cancellationStatus: row.cancellation_status,
+    fulfillmentHold: Boolean(row.fulfillment_hold),
     paymentMethod: payment?.method || null,
     paymentReference: payment?.reference_number || '',
     accountNumber: payment?.account_number || '',
@@ -67,6 +70,7 @@ function normalize(row, cashierNames = {}) {
     refundStatus: row.refund_status,
     refunds: (row.refunds || []).map((refund) => ({
       id: refund.id,
+      orderId: row.id,
       amount: Number(refund.refund_amount || 0),
       originalAmount: Number(refund.original_amount || 0),
       status: refund.refund_status,
@@ -217,9 +221,10 @@ export async function requestRefund({ orderId, amount, reason, method }) {
   return data
 }
 
-export async function processRefund({ refundId, approve, referenceNumber }) {
+export async function processRefund({ refundId, orderId, approve, referenceNumber }) {
   const { error } = await supabase.rpc('staff_process_refund', { p_refund_id: refundId, p_approve: approve, p_reference_number: referenceNumber || null })
   if (error) throw error
+  if (orderId) await dispatchOrderEmails(orderId)
 }
 
 export async function correctPaymentStatus({ orderId, newStatus, reason }) {

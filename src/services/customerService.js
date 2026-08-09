@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { dispatchOrderEmails } from './orderEmailService'
 export async function fetchProducts(){if(!isSupabaseConfigured)return null;const {data,error}=await supabase.from('products').select('*, product_variations(*), product_addons(addons(*))').eq('is_active',true).order('display_order');if(error)throw error;return data}
 export async function fetchProfile(userId){const {data,error}=await supabase.from('profiles').select('*').eq('id',userId).single();if(error)throw error;return data}
 export async function saveProfile(userId,values){
@@ -34,7 +35,7 @@ export async function uploadPaymentProof({orderId,userId,file}){
   }
   return {path,filename}
 }
-const ORDER_DETAIL_SELECT='id,order_number,order_type,status,subtotal,delivery_fee,final_total,payment_status,payment_confirmed,payment_proof_path,refund_status,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,schedule_date,schedule_time,created_at,updated_at,delivery_address,delivery_notes,customer_name,customer_phone,customer_email,order_items(id,menu_item_id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),payments(method,status,reference_number)'
+const ORDER_DETAIL_SELECT='id,order_number,order_type,status,subtotal,delivery_fee,final_total,payment_status,payment_confirmed,payment_proof_path,refund_status,cancellation_status,fulfillment_hold,cancellation_reason,cancellation_notes,cancellation_requested_by_role,cancellation_requested_at,cancellation_review_notes,cancelled_by_role,cancelled_at,schedule_date,schedule_time,created_at,updated_at,delivery_address,delivery_notes,customer_name,customer_phone,customer_email,order_items(id,menu_item_id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),payments(method,status,reference_number)'
 
 export async function fetchCustomerOrders(userId){
   const {data,error}=await supabase.from('orders').select(ORDER_DETAIL_SELECT).eq('customer_id',userId).order('created_at',{ascending:false})
@@ -49,7 +50,8 @@ export async function fetchCustomerOrder(orderId){
 export async function cancelCustomerOrder(orderId,reason,notes){
   const {data,error}=await supabase.rpc('customer_cancel_order',{p_order_id:orderId,p_reason:reason,p_notes:notes||null})
   if(error)throw error
-  return data
+  const email=await dispatchOrderEmails(orderId)
+  return {...(data||{}),email}
 }
 export async function getCustomerPaymentProofUrl(path){
   if(!path)return null

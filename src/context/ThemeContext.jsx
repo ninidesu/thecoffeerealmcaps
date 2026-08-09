@@ -3,26 +3,14 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 const STORAGE_KEY = 'coffee-realm-management-theme'
 const ThemeContext = createContext(null)
 
-function systemTheme() {
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
 function savedPreference() {
   const saved = window.localStorage.getItem(STORAGE_KEY)
-  return ['system', 'light', 'dark'].includes(saved) ? saved : 'system'
+  return ['light', 'dark'].includes(saved) ? saved : 'light'
 }
 
 export function ThemeProvider({ children }) {
   const [preference, setPreference] = useState(savedPreference)
-  const [system, setSystem] = useState(systemTheme)
-  const resolvedTheme = preference === 'system' ? system : preference
-
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-color-scheme: dark)')
-    const update = (event) => setSystem(event.matches ? 'dark' : 'light')
-    query.addEventListener('change', update)
-    return () => query.removeEventListener('change', update)
-  }, [])
+  const resolvedTheme = preference
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, preference)

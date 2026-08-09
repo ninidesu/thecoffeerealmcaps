@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Brand from '../Brand'
 import { useAuth } from '../../context/AuthContext'
 import { useCart } from '../../context/CartContext'
+import { isCustomerRole } from '../../lib/auth'
 import LogoutConfirmModal from '../auth/LogoutConfirmModal'
 
 const centerLinks = [['Menu', '/menu'], ['My Orders', '/orders'], ['Help', '/help'], ['Settings', '/settings']]
@@ -14,7 +15,8 @@ export default function CustomerLayout() {
   const [scrolled, setScrolled] = useState(false)
   const [logoutOpen, setLogoutOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
-  const { user, signOut } = useAuth()
+  const { user, profile, signOut } = useAuth()
+  const customerUser = user && isCustomerRole(profile?.role) ? user : null
   const cart = useCart()
   const navigate = useNavigate()
   const location = useLocation()
@@ -77,7 +79,7 @@ export default function CustomerLayout() {
               <span>Cart</span>
               <b aria-label={`${cart.itemCount} cart items`}>{cart.itemCount}</b>
             </button>
-            {user ? (
+            {customerUser ? (
               <button className="nav-auth-action" type="button" onClick={() => setLogoutOpen(true)}>
                 <LogOut size={18} />
                 Logout
@@ -92,7 +94,7 @@ export default function CustomerLayout() {
         </nav>
       </header>
       <div className="customer-route-shell" key={location.pathname}><Outlet /></div>
-      <CartDrawer cart={cart} user={user} />
+      <CartDrawer cart={cart} user={customerUser} />
       {location.pathname !== '/' && (
         <footer className="customer-footer">
           <Brand light />

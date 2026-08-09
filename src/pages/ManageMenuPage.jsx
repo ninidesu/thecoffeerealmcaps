@@ -13,6 +13,7 @@ import {
   upsertMenuItem, setMenuItemAvailability, archiveMenuItem, duplicateMenuItem, setMenuItemRecipe, uploadMenuItemImage,
 } from '../services/manageMenuService'
 import { shouldShowSystemNotification } from '../services/staffSettingsService'
+import { useManagementSessionState } from '../hooks/useManagementSessionState'
 
 const REASON_META = {
   manual: { label: 'Manually disabled', tone: 'neutral' },
@@ -45,22 +46,22 @@ export default function ManageMenuPage() {
   const [busyId, setBusyId] = useState('')
   const [toasts, setToasts] = useState([])
 
-  const [tab, setTab] = useState('all')
-  const [subcategoryFilter, setSubcategoryFilter] = useState('all')
-  const [search, setSearch] = useState('')
-  const [customizableFilter, setCustomizableFilter] = useState('all')
-  const [minPrice, setMinPrice] = useState('')
-  const [maxPrice, setMaxPrice] = useState('')
-  const [sortBy, setSortBy] = useState('name')
-  const [view, setView] = useState('grid')
-  const [selectedIds, setSelectedIds] = useState([])
+  const [tab, setTab] = useManagementSessionState('staff:menu:tab', 'all')
+  const [subcategoryFilter, setSubcategoryFilter] = useManagementSessionState('staff:menu:subcategory-filter', 'all')
+  const [search, setSearch] = useManagementSessionState('staff:menu:search', '')
+  const [customizableFilter, setCustomizableFilter] = useManagementSessionState('staff:menu:customizable-filter', 'all')
+  const [minPrice, setMinPrice] = useManagementSessionState('staff:menu:min-price', '')
+  const [maxPrice, setMaxPrice] = useManagementSessionState('staff:menu:max-price', '')
+  const [sortBy, setSortBy] = useManagementSessionState('staff:menu:sort', 'name')
+  const [view, setView] = useManagementSessionState('staff:menu:view', 'grid')
+  const [selectedIds, setSelectedIds] = useManagementSessionState('staff:menu:selected-items', [])
   const [menuOpenId, setMenuOpenId] = useState('')
 
-  const [formTarget, setFormTarget] = useState(null)
-  const [drawerItem, setDrawerItem] = useState(null)
-  const [availabilityTarget, setAvailabilityTarget] = useState(null)
-  const [archiveTarget, setArchiveTarget] = useState(null)
-  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false)
+  const [formTarget, setFormTarget] = useManagementSessionState('staff:menu:item-form', null)
+  const [drawerItem, setDrawerItem] = useManagementSessionState('staff:menu:drawer', null)
+  const [availabilityTarget, setAvailabilityTarget] = useManagementSessionState('staff:menu:availability-confirmation', null)
+  const [archiveTarget, setArchiveTarget] = useManagementSessionState('staff:menu:archive-confirmation', null)
+  const [categoryManagerOpen, setCategoryManagerOpen] = useManagementSessionState('staff:menu:category-manager', false)
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
 
@@ -200,7 +201,7 @@ export default function ManageMenuPage() {
   const attentionCount = unavailableCount
 
   return (
-    <AppShell role="staff" title="Manage Menu" actions={
+    <AppShell role="staff" title="Manage Menu" onRefresh={load} actions={
       <div className="ops-header-actions">
         <div className="ops-clock">
           <span>{new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric' }).format(now)}</span>
@@ -483,20 +484,22 @@ function ItemDrawer({ item, onClose, onEdit, onToggleAvailability }) {
 }
 
 function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave }) {
-  const [values, setValues] = useState({
+  const draftScope = `staff:menu:${item?.id || 'new'}:draft`
+  const [values, setValues, clearValues] = useManagementSessionState(`${draftScope}:values`, {
     name: item?.name || '', description: item?.description || '', mainCategoryId: item?.mainCategoryId || mainCategories[0]?.id || '',
     subcategoryId: item?.subcategoryId || '', price: item?.price ?? '', itemType: item?.itemType || 'food', temperatureType: item?.temperatureType || 'none',
     allowIce: item?.allowIce ?? false, allowSugar: item?.allowSugar ?? false, allowAddons: item?.allowAddons ?? false,
     imageUrl: item?.imageUrl || '', manualAvailable: item?.manualAvailable ?? true, isFeatured: item?.isFeatured ?? false, isBestseller: item?.isBestseller ?? false,
     prepTimeMinutes: item?.prepTimeMinutes ?? '', availableFrom: item?.availableFrom || '', availableUntil: item?.availableUntil || '', sortOrder: item?.sortOrder ?? 0,
   })
-  const [imagePreview, setImagePreview] = useState(item?.image || '')
+  const [imagePreview, setImagePreview, clearImagePreview] = useManagementSessionState(`${draftScope}:image`, item?.image || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [section, setSection] = useState('basics')
+  const [section, setSection, clearSection] = useManagementSessionState(`${draftScope}:section`, 'basics')
   const fileRef = useRef(null)
   const set = (key, value) => setValues((c) => ({ ...c, [key]: value }))
+  const close = () => { clearValues(); clearImagePreview(); clearSection(); onClose() }
 
   const availableSubcategories = useMemo(() => subcategories.filter((s) => !s.is_archived && s.main_category_id === values.mainCategoryId), [subcategories, values.mainCategoryId])
 
@@ -524,6 +527,7 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
     setSaving(true); setError('')
     try {
       await onSave({ id: item?.id, ...values, price, prepTimeMinutes: values.prepTimeMinutes === '' ? null : Number(values.prepTimeMinutes) })
+      clearValues(); clearImagePreview(); clearSection()
     } catch (cause) {
       setError(describeError(cause, 'Could not save this item.'))
       setSaving(false)
@@ -531,9 +535,9 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
   }
 
   return (
-    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape' && !saving) onClose() }}>
+    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) close() }} onKeyDown={(e) => { if (e.key === 'Escape' && !saving) close() }}>
       <section className="payment-modal inv-form-modal menu-form-modal menu-workspace-modal ops-popup-modal" role="dialog" aria-modal="true" aria-labelledby="menu-form-title">
-        <button className="payment-modal-close" type="button" onClick={onClose} disabled={saving} aria-label="Close item editor"><X size={18} /></button>
+        <button className="payment-modal-close" type="button" onClick={close} disabled={saving} aria-label="Close item editor"><X size={18} /></button>
         <header className="menu-workspace-header">
           <span className="payment-modal-kicker">{item ? 'Edit menu item' : 'New menu item'}</span>
           <h2 id="menu-form-title">{item ? item.name : 'Add a new menu item'}</h2>
@@ -593,7 +597,7 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
             </div>
           </div>
           {error && <p className="form-error menu-workspace-error" role="alert">{error}</p>}
-          <div className="payment-modal-actions menu-workspace-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || uploading}>{saving ? 'Saving…' : item ? 'Save changes' : 'Add item'}</button></div>
+          <div className="payment-modal-actions menu-workspace-actions"><button className="secondary-button" type="button" onClick={close} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || uploading}>{saving ? 'Saving…' : item ? 'Save changes' : 'Add item'}</button></div>
         </form>
       </section>
     </div>
@@ -601,12 +605,13 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
 }
 
 function CategoryManagerModal({ mainCategories, subcategories, onClose, onChanged, pushToast }) {
-  const [tab, setTab] = useState('main')
-  const [name, setName] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [parentId, setParentId] = useState(mainCategories.find((category) => !category.is_archived)?.id || '')
+  const [tab, setTab, clearTab] = useManagementSessionState('staff:menu:category-draft:tab', 'main')
+  const [name, setName, clearName] = useManagementSessionState('staff:menu:category-draft:name', '')
+  const [displayName, setDisplayName, clearDisplayName] = useManagementSessionState('staff:menu:category-draft:display-name', '')
+  const [parentId, setParentId, clearParentId] = useManagementSessionState('staff:menu:category-draft:parent', mainCategories.find((category) => !category.is_archived)?.id || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const close = () => { clearTab(); clearName(); clearDisplayName(); clearParentId(); onClose() }
 
   const addMain = async (event) => {
     event.preventDefault()
@@ -641,9 +646,9 @@ function CategoryManagerModal({ mainCategories, subcategories, onClose, onChange
   const changeTab = (nextTab) => { setTab(nextTab); setError(''); setName(''); setDisplayName('') }
 
   return (
-    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape' && !saving) onClose() }}>
+    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) close() }} onKeyDown={(e) => { if (e.key === 'Escape' && !saving) close() }}>
       <section className="payment-modal inv-form-modal category-workspace-modal ops-popup-modal" role="dialog" aria-modal="true" aria-labelledby="category-manager-title">
-        <button className="payment-modal-close" type="button" onClick={onClose} disabled={saving} aria-label="Close category manager"><X size={18} /></button>
+        <button className="payment-modal-close" type="button" onClick={close} disabled={saving} aria-label="Close category manager"><X size={18} /></button>
         <header className="menu-workspace-header">
           <span className="payment-modal-kicker">Menu organization</span>
           <h2 id="category-manager-title">Categories and subcategories</h2>

@@ -22,6 +22,7 @@ import {
   rememberStaffFilters,
   shouldShowSystemNotification,
 } from '../services/staffSettingsService'
+import { useManagementSessionState } from '../hooks/useManagementSessionState'
 
 const ORDER_STATUS_OPTIONS = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Completed', 'Cancelled', 'Ordered']
 const PAYMENT_METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', bank_transfer: 'Bank Transfer', cod: 'Cash on Delivery', other: 'Other' }
@@ -34,8 +35,11 @@ const PAYMENT_STATUS_OPTIONS = [
 const REFUND_STATUS_OPTIONS = [
   ['all', 'All refund states'],
   ['not_applicable', 'No refund'],
+  ['pending_review', 'Payment review pending'],
   ['pending', 'Refund pending'],
+  ['processing', 'Refund processing'],
   ['processed', 'Refunded'],
+  ['failed', 'Refund needs attention'],
   ['rejected', 'Refund rejected'],
 ]
 const QUICK_RANGE_LABEL = { all: 'All Time', today: 'Today', yesterday: 'Yesterday', week: 'This Week', month: 'This Month', custom: 'Custom Range' }
@@ -116,6 +120,9 @@ function refundStatusMeta(transaction) {
   const hasRejected = transaction.refunds.some((refund) => refund.status === 'rejected')
   if (processed > 0 && processed < transaction.finalTotal) return { key: 'partial', label: 'Partially Refunded', tone: 'attention' }
   if (processed >= transaction.finalTotal && processed > 0) return { key: 'processed', label: 'Refunded', tone: 'completed' }
+  if (transaction.refundStatus === 'pending_review') return { key: 'pending_review', label: 'Payment Review Pending', tone: 'attention' }
+  if (transaction.refundStatus === 'processing') return { key: 'processing', label: 'Refund Processing', tone: 'attention' }
+  if (transaction.refundStatus === 'failed') return { key: 'failed', label: 'Refund Needs Attention', tone: 'cancelled' }
   if (hasPending || transaction.refundStatus === 'pending') return { key: 'pending', label: 'Refund Pending', tone: 'attention' }
   if (hasRejected || transaction.refundStatus === 'rejected') return { key: 'rejected', label: 'Refund Rejected', tone: 'cancelled' }
   return { key: 'not_applicable', label: 'No refund', tone: 'neutral' }
@@ -328,10 +335,12 @@ export default function TransactionsPage() {
   const [exporting, setExporting] = useState('')
   const [rowMenuId, setRowMenuId] = useState('')
 
-  const [detailTarget, setDetailTarget] = useState(null)
-  const [refundTarget, setRefundTarget] = useState(null)
-  const [voidTarget, setVoidTarget] = useState(null)
-  const [correctionTarget, setCorrectionTarget] = useState(null)
+  const sessionScope = location.pathname.startsWith('/admin') ? 'admin:transactions' : 'staff:transactions'
+  const [detailTarget, setDetailTarget] = useManagementSessionState(`${sessionScope}:details`, null)
+  const [refundTarget, setRefundTarget] = useManagementSessionState(`${sessionScope}:refund`, null)
+  const [refundProcessTarget, setRefundProcessTarget] = useManagementSessionState(`${sessionScope}:refund-process`, null)
+  const [voidTarget, setVoidTarget] = useManagementSessionState(`${sessionScope}:void`, null)
+  const [correctionTarget, setCorrectionTarget] = useManagementSessionState(`${sessionScope}:payment-correction`, null)
 
   const deferredSearch = useDeferredValue(search)
   const queryRef = useRef(null)
@@ -612,8 +621,10 @@ export default function TransactionsPage() {
       pushToast('success', `${voidTarget.orderNumber} was voided.`)
       setVoidTarget(null)
       await load(queryRef.current)
+      return true
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not void this transaction.'))
+      return false
     } finally {
       setBusyId('')
     }
@@ -626,18 +637,21 @@ export default function TransactionsPage() {
       pushToast('success', `Refund requested for ${refundTarget.orderNumber}.`)
       setRefundTarget(null)
       await load(queryRef.current)
+      return true
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not request this refund.'))
+      return false
     } finally {
       setBusyId('')
     }
   }
 
-  const runProcessRefund = async (refund, approve) => {
+  const runProcessRefund = async ({ refund, approve, referenceNumber }) => {
     setBusyId(refund.id)
     try {
-      await processRefund({ refundId: refund.id, approve, referenceNumber: refund.referenceNumber })
+      await processRefund({ refundId: refund.id, orderId: refund.orderId || detailTarget?.id, approve, referenceNumber })
       pushToast('success', approve ? 'Refund marked as processed.' : 'Refund rejected.')
+      setRefundProcessTarget(null)
       await load(queryRef.current)
       if (detailTarget?.id) {
         const fresh = await fetchTransactionById(detailTarget.id)
@@ -657,8 +671,10 @@ export default function TransactionsPage() {
       pushToast('success', `Payment status corrected for ${correctionTarget.orderNumber}.`)
       setCorrectionTarget(null)
       await load(queryRef.current)
+      return true
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not correct the payment status.'))
+      return false
     } finally {
       setBusyId('')
     }
@@ -942,13 +958,16 @@ export default function TransactionsPage() {
           onDownloadReceipt={downloadReceipt}
           onViewProof={viewPaymentProof}
           onRequestRefund={(transaction) => setRefundTarget(transaction)}
-          onProcessRefund={runProcessRefund}
+          onProcessRefund={(refund, approve) => setRefundProcessTarget({ refund, approve })}
           onVoid={(transaction) => setVoidTarget(transaction)}
           onCorrectPayment={(transaction) => setCorrectionTarget(transaction)}
         />
       )}
       {refundTarget && (
         <RefundModal transaction={refundTarget} busy={busyId === refundTarget.id} onClose={() => setRefundTarget(null)} onSubmit={runRefundRequest} />
+      )}
+      {refundProcessTarget && (
+        <RefundProcessModal target={refundProcessTarget} busy={busyId === refundProcessTarget.refund.id} onClose={() => setRefundProcessTarget(null)} onSubmit={runProcessRefund} />
       )}
       {voidTarget && (
         <ReasonConfirmModal
@@ -1258,27 +1277,59 @@ function buildTimeline(transaction, audit) {
   return items.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0))
 }
 
+function RefundProcessModal({ target, busy, onClose, onSubmit }) {
+  const { refund, approve } = target
+  const [referenceNumber, setReferenceNumber] = useState(refund.referenceNumber || '')
+  const submit = (event) => {
+    event.preventDefault()
+    if (approve && !referenceNumber.trim()) return
+    onSubmit({ refund, approve, referenceNumber: referenceNumber.trim() || null })
+  }
+  return (
+    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+      <section className="payment-modal" role="alertdialog" aria-modal="true" aria-labelledby="refund-process-title">
+        <span className="payment-modal-kicker">Refund control</span>
+        <h2 id="refund-process-title">{approve ? 'Confirm refund transfer' : 'Reject refund request'}</h2>
+        <p>{approve
+          ? `Only mark this ${money(refund.amount)} refund as processed after the customer payout has actually been completed.`
+          : `Rejecting this ${money(refund.amount)} refund will leave the cancelled order unresolved for follow-up.`}</p>
+        <form onSubmit={submit}>
+          {approve && <label className="field"><span>Transfer or refund reference</span><input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value)} placeholder="e.g. GCash or bank reference number" autoFocus required /></label>}
+          <p className="ops-proof-pending">{approve ? 'Saving this reference completes the refund and sends the customer a completion email.' : 'This action does not record a completed customer payout.'}</p>
+          <div className="payment-modal-actions">
+            <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Go back</button>
+            <button className={approve ? 'primary-button' : 'danger-button'} type="submit" disabled={busy || (approve && !referenceNumber.trim())}>{busy ? 'Saving...' : approve ? 'Mark refund processed' : 'Reject refund'}</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
 function RefundModal({ transaction, busy, onClose, onSubmit }) {
   const remaining = transaction.finalTotal - processedRefundAmount(transaction) - transaction.refunds.filter((refund) => refund.status === 'pending').reduce((sum, refund) => sum + refund.amount, 0)
-  const [amount, setAmount] = useState(remaining.toFixed(2))
-  const [reason, setReason] = useState('')
-  const [method, setMethod] = useState(transaction.paymentMethod || 'manual')
+  const draftScope = `transactions:${transaction.id}:refund-draft`
+  const [amount, setAmount, clearAmount] = useManagementSessionState(`${draftScope}:amount`, remaining.toFixed(2))
+  const [reason, setReason, clearReason] = useManagementSessionState(`${draftScope}:reason`, '')
+  const [method, setMethod, clearMethod] = useManagementSessionState(`${draftScope}:method`, transaction.paymentMethod || 'manual')
   const [error, setError] = useState('')
+  const clearDraft = () => { clearAmount(); clearReason(); clearMethod() }
+  const close = () => { clearDraft(); onClose() }
 
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault()
     const numeric = Number(amount)
     if (Number.isNaN(numeric) || numeric <= 0) return setError('Enter a refund amount greater than zero.')
     if (numeric > remaining) return setError(`Refund amount cannot exceed the remaining refundable balance of ${money(remaining)}.`)
     if (!reason.trim()) return setError('A refund reason is required.')
     setError('')
-    onSubmit({ amount: numeric, reason, method })
+    if (await onSubmit({ amount: numeric, reason, method })) clearDraft()
   }
 
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) close() }}>
       <section className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="refund-title">
-        <button className="payment-modal-close" type="button" onClick={onClose} disabled={busy} aria-label="Close">x</button>
+        <button className="payment-modal-close" type="button" onClick={close} disabled={busy} aria-label="Close">x</button>
         <span className="payment-modal-kicker">Refund</span>
         <h2 id="refund-title">Request refund for {transaction.orderNumber}</h2>
         <p>Remaining refundable balance: <b>{money(remaining)}</b></p>
@@ -1298,7 +1349,7 @@ function RefundModal({ transaction, busy, onClose, onSubmit }) {
           <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why this refund is needed." required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
-            <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="secondary-button" type="button" onClick={close} disabled={busy}>Cancel</button>
             <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Submitting...' : 'Request Refund'}</button>
           </div>
         </form>
@@ -1308,18 +1359,20 @@ function RefundModal({ transaction, busy, onClose, onSubmit }) {
 }
 
 function ReasonConfirmModal({ title, kicker, description, confirmLabel, busy, onClose, onConfirm }) {
-  const [reason, setReason] = useState('')
+  const draftScope = `transactions:${kicker.toLowerCase()}:reason-draft`
+  const [reason, setReason, clearReason] = useManagementSessionState(draftScope, '')
   const [error, setError] = useState('')
+  const close = () => { clearReason(); onClose() }
 
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault()
     if (!reason.trim()) return setError('A reason is required.')
     setError('')
-    onConfirm(reason)
+    if (await onConfirm(reason)) clearReason()
   }
 
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) close() }}>
       <section className="payment-modal" role="alertdialog" aria-modal="true" aria-labelledby="reason-confirm-title">
         <span className="payment-modal-kicker">{kicker}</span>
         <h2 id="reason-confirm-title">{title}</h2>
@@ -1328,7 +1381,7 @@ function ReasonConfirmModal({ title, kicker, description, confirmLabel, busy, on
           <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
-            <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="secondary-button" type="button" onClick={close} disabled={busy}>Cancel</button>
             <button className="danger-button" type="submit" disabled={busy}>{busy ? 'Saving...' : confirmLabel}</button>
           </div>
         </form>
@@ -1338,21 +1391,24 @@ function ReasonConfirmModal({ title, kicker, description, confirmLabel, busy, on
 }
 
 function PaymentCorrectionModal({ transaction, busy, onClose, onSubmit }) {
-  const [newStatus, setNewStatus] = useState(transaction.paymentStatus === 'paid' ? 'pending' : 'paid')
-  const [reason, setReason] = useState('')
+  const draftScope = `transactions:${transaction.id}:correction-draft`
+  const [newStatus, setNewStatus, clearStatus] = useManagementSessionState(`${draftScope}:status`, transaction.paymentStatus === 'paid' ? 'pending' : 'paid')
+  const [reason, setReason, clearReason] = useManagementSessionState(`${draftScope}:reason`, '')
   const [error, setError] = useState('')
+  const clearDraft = () => { clearStatus(); clearReason() }
+  const close = () => { clearDraft(); onClose() }
 
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault()
     if (!reason.trim()) return setError('A reason is required for this correction.')
     setError('')
-    onSubmit(newStatus, reason)
+    if (await onSubmit(newStatus, reason)) clearDraft()
   }
 
   return (
-    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <div className="payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) close() }}>
       <section className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="correction-title">
-        <button className="payment-modal-close" type="button" onClick={onClose} disabled={busy} aria-label="Close">x</button>
+        <button className="payment-modal-close" type="button" onClick={close} disabled={busy} aria-label="Close">x</button>
         <span className="payment-modal-kicker">Payment correction</span>
         <h2 id="correction-title">Correct payment status for {transaction.orderNumber}</h2>
         <form onSubmit={submit}>
@@ -1365,7 +1421,7 @@ function PaymentCorrectionModal({ transaction, busy, onClose, onSubmit }) {
           <label className="field"><span>Reason for correction</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
-            <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="secondary-button" type="button" onClick={close} disabled={busy}>Cancel</button>
             <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Save Correction'}</button>
           </div>
         </form>

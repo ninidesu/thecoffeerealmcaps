@@ -1,367 +1,353 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, ArrowUpRight, Ban, Banknote, Box, Boxes, Calendar, Check,
-  Clock, CreditCard, PhilippinePeso, ShoppingBag, TrendingDown, TrendingUp, UserPlus, Users,
+  AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3,
+  Coffee, CreditCard, Mail, PackageCheck, PackageX, ReceiptText, RefreshCw, RotateCcw,
+  ShoppingBag, TrendingDown, TrendingUp, Truck, UserRoundCheck, UsersRound, WalletCards,
 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import AppShell from '../components/AppShell'
-import { money } from '../utils/money'
+import ContentManagementPage from './ContentManagementPage'
+import SystemSettingsPage from './SystemSettingsPage'
+import UsersAccessPage from './UsersAccessPage'
+import AdminInventoryPage from './AdminInventoryPage'
+import InventoryReportPage from './InventoryReportPage'
+import TransactionsPage from './TransactionsPage'
+import SalesReportPage from './SalesReportPage'
+import CancellationReportPage from './CancellationReportPage'
+import { computeDashboardMetrics, fetchDashboardData } from '../services/adminDashboardService'
 import { describeError } from '../utils/describeError'
-import { supabase } from '../lib/supabase'
-import { fetchDashboardData, computeDashboardMetrics } from '../services/adminDashboardService'
+import { money } from '../utils/money'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
-const FULFILLMENT_LABEL = { delivery: 'Delivery', pickup: 'Pickup', 'walk-in': 'Dine-in' }
-const FULFILLMENT_COLOR = { delivery: '#1b2f22', pickup: '#4f7cff', 'walk-in': '#9b8cf2' }
-const FULFILLMENT_HOVER_COLOR = { delivery: '#2f5c46', pickup: '#2f6ff2', 'walk-in': '#8167ef' }
-const PAYMENT_LABEL = { cash: 'Cash', gcash: 'GCash', bank_transfer: 'Bank Transfer', cod: 'Cash on Delivery', other: 'Other' }
-const PAYMENT_ICON = { cash: Banknote, gcash: CreditCard, bank_transfer: CreditCard, cod: Box, other: CreditCard }
-const prefersReducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-
-function useCountUp(value, duration = 700) {
-  const [display, setDisplay] = useState(0)
-  const frame = useRef(null)
-  useEffect(() => {
-    if (prefersReducedMotion()) { setDisplay(value); return }
-    const start = performance.now()
-    const from = display
-    const tick = (now) => {
-      const progress = Math.min(1, (now - start) / duration)
-      const eased = 1 - Math.pow(1 - progress, 3)
-      setDisplay(from + (value - from) * eased)
-      if (progress < 1) frame.current = requestAnimationFrame(tick)
-    }
-    frame.current = requestAnimationFrame(tick)
-    const settle = setTimeout(() => setDisplay(value), duration + 60)
-    return () => { cancelAnimationFrame(frame.current); clearTimeout(settle) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, duration])
-  return display
+const adminPageTitles = {
+  '/admin': 'Dashboard',
+  '/admin/inventory': 'Inventory Monitoring',
+  '/admin/transactions': 'Transaction History',
+  '/admin/reports': 'Sales',
+  '/admin/inventory-report': 'Inventory Report',
+  '/admin/cancellations': 'Cancellation & Refunds',
+  '/admin/products': 'Product Performance',
+  '/admin/trends': 'Sales Trends',
+  '/admin/content': 'Content Management',
+  '/admin/users-access/users': 'Users & Access',
+  '/admin/users-access/activity': 'Users & Access',
+  '/admin/settings': 'System Settings',
+  '/admin/preferences': 'Settings',
 }
-function AnimatedValue({ value, format }) {
-  const animated = useCountUp(value)
-  return <>{format ? format(animated) : Math.round(animated)}</>
+
+const stageMeta = [
+  ['pending', 'Needs review', Clock3, '#d6a34d'],
+  ['preparing', 'Preparing', Coffee, '#5887a0'],
+  ['ready', 'Ready for pickup', PackageCheck, '#4d8c68'],
+  ['delivery', 'Out for delivery', Truck, '#397f7b'],
+  ['completed', 'Completed', CheckCircle2, '#8a9690'],
+]
+
+const paymentLabels = { gcash: 'GCash', bank_transfer: 'Bank transfer', cod: 'Cash / COD', cash: 'Cash', other: 'Other' }
+const fulfillmentLabels = { delivery: 'Delivery', pickup: 'Pickup', 'walk-in': 'Walk-in' }
+
+function percentage(value) {
+  if (!Number.isFinite(value)) return '0%'
+  return `${Math.abs(value).toFixed(1)}%`
+}
+
+function formatShortDate(value) {
+  return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric' }).format(new Date(value))
+}
+
+function timeAgo(value) {
+  const elapsed = Date.now() - new Date(value).getTime()
+  if (elapsed < 60000) return 'Just now'
+  if (elapsed < 3600000) return `${Math.floor(elapsed / 60000)}m ago`
+  if (elapsed < 86400000) return `${Math.floor(elapsed / 3600000)}h ago`
+  return formatShortDate(value)
 }
 
 export default function AdminDashboard() {
-  const [data, setData] = useState(null)
+  const { pathname } = useLocation()
+  if (pathname === '/admin/team') return <Navigate to="/admin/users-access/users" replace />
+  if (pathname === '/admin/logs') return <Navigate to="/admin/users-access/activity" replace />
+  if (pathname === '/admin/users-access') return <Navigate to="/admin/users-access/users" replace />
+  if (pathname.startsWith('/admin/users-access/')) return <UsersAccessPage />
+  if (pathname === '/admin/content') return <ContentManagementPage />
+  if (pathname === '/admin/settings') return <SystemSettingsPage />
+  if (pathname === '/admin/inventory') return <AdminInventoryPage />
+  if (pathname === '/admin/inventory-report') return <InventoryReportPage />
+  if (pathname === '/admin/transactions') return <TransactionsPage />
+  if (pathname === '/admin/reports' || pathname === '/admin/products' || pathname === '/admin/trends') return <SalesReportPage />
+  if (pathname === '/admin/cancellations') return <CancellationReportPage />
+  if (pathname !== '/admin') return <AppShell role="admin" title={adminPageTitles[pathname] || 'Dashboard'} />
+  return <AdminDashboardHome />
+}
+
+function AdminDashboardHome() {
+  const [metrics, setMetrics] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [now, setNow] = useState(() => new Date())
-  const [profile, setProfile] = useState(null)
+  const [lastUpdated, setLastUpdated] = useState(null)
 
-  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
-  useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: sessionData }) => {
-      const userId = sessionData.session?.user?.id
-      if (!userId) return
-      const { data: p } = await supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle()
-      setProfile(p)
-    })
-  }, [])
-
-  const load = async () => {
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true)
     try {
       const raw = await fetchDashboardData()
-      setData(raw)
+      setMetrics(computeDashboardMetrics(raw))
+      setLastUpdated(new Date())
       setError('')
     } catch (cause) {
-      setError(describeError(cause, 'Could not load dashboard data.'))
+      setError(describeError(cause, 'The dashboard could not be loaded.'))
     } finally {
-      setLoading(false)
+      if (!quiet) setLoading(false)
     }
-  }
-  useEffect(() => { load() }, [])
-
-  useEffect(() => {
-    const channel = supabase
-      .channel('admin-dashboard-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'refunds' }, () => load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_stock' }, () => load())
-      .subscribe()
-    const onVisible = () => { if (document.visibilityState === 'visible') load() }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => { supabase.removeChannel(channel); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
 
-  const metrics = useMemo(() => data && computeDashboardMetrics(data), [data])
-  const hour = now.getHours()
-  const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
+  useEffect(() => { load() }, [load])
 
-  return (
-    <AppShell role="admin" title="Dashboard" eyebrow={`Good ${greeting}, ${profile?.full_name || 'Admin'}! Here's what's happening at your café today. ☕`} actions={
-      <div className="dash-header-actions">
-        <div className="dash-pill"><Calendar size={14} /><span>{new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(now)}</span></div>
-        <div className="dash-pill"><Clock size={14} /><span>{new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).format(now)} PHT</span></div>
+  useEffect(() => {
+    if (!isSupabaseConfigured) return undefined
+    const refresh = () => load({ quiet: true })
+    const channel = supabase.channel('admin-dashboard-live')
+    ;['orders', 'payments', 'refunds', 'inventory_stock', 'menu_items', 'customer_messages'].forEach((table) => {
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, refresh)
+    })
+    channel.subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [load])
+
+  const attentionCount = metrics ? metrics.attentionOrders.length + metrics.pendingRefunds.length + metrics.outOfStockItems.length + metrics.awaitingMessages.length + metrics.criticalAuditEvents.length : 0
+
+  return <AppShell
+    role="admin"
+    title="Dashboard"
+    eyebrow="Business health, live operations, and the work that needs attention."
+    onRefresh={load}
+    notificationCount={attentionCount}
+    titleActions={<div className="ad-live-state"><i />Live monitoring{lastUpdated && <span>Updated {timeAgo(lastUpdated)}</span>}</div>}
+  >
+    {error && <div className="ad-error" role="alert"><AlertTriangle size={19} /><div><b>Dashboard unavailable</b><span>{error}</span></div><button type="button" onClick={() => load()}><RefreshCw size={15} />Try again</button></div>}
+    {loading ? <DashboardSkeleton /> : metrics && <DashboardContent metrics={metrics} />}
+  </AppShell>
+}
+
+function DashboardContent({ metrics }) {
+  const actionCards = [
+    { label: 'Orders to review', value: metrics.attentionOrders.length, detail: 'Payment or cancellation hold', icon: Clock3, tone: 'amber', to: '/staff' },
+    { label: 'Pending refunds', value: metrics.pendingRefunds.length, detail: money(metrics.pendingRefundAmount), icon: RotateCcw, tone: 'rose', to: '/admin/cancellations' },
+    { label: 'Stock at risk', value: metrics.lowStockItems.length, detail: `${metrics.outOfStockItems.length} out of stock`, icon: PackageX, tone: 'rose', to: '/admin/inventory' },
+    { label: 'Awaiting reply', value: metrics.awaitingMessages.length, detail: `${metrics.messagesToday} received today`, icon: Mail, tone: 'blue', to: '/staff/messages' },
+  ]
+
+  return <div className="ad-dashboard dash-fade-in">
+    <section className="ad-section" aria-labelledby="attention-heading">
+      <SectionHeading
+        id="attention-heading"
+        title="Needs attention"
+        detail="Open an item to review the complete workflow."
+        action={<div className="ad-attention-heading-actions">
+          <div className={`ad-store-state is-${metrics.storeStatus}`}><i /><b>{metrics.storeStatus === 'closed' ? 'Online ordering is paused' : 'Store operations are live'}</b></div>
+          <Link to="/admin/settings">Review system settings <ArrowRight size={15} /></Link>
+        </div>}
+      />
+      <div className="ad-attention-grid">
+        {actionCards.map((item) => <Link className={`ad-attention-card is-${item.tone}`} to={item.to} key={item.label}>
+          <span className="ad-attention-icon"><item.icon size={18} /></span><span><b>{item.value}</b><strong>{item.label}</strong><small>{item.detail}</small></span><ArrowRight size={15} />
+        </Link>)}
       </div>
-    }>
-      {error && <p className="form-error">{error}</p>}
+    </section>
 
-      {loading || !metrics ? <DashboardSkeleton /> : (
-        <div className="dash-fade-in">
-          <section className="metrics dash-kpi-row">
-            <KpiCard icon={PhilippinePeso} label="Total Sales" value={<AnimatedValue value={metrics.totalSales} format={money} />}
-              detail={metrics.salesChangePct !== 0 ? <span className={metrics.salesChangePct >= 0 ? 'dash-trend-up' : 'dash-trend-down'}>{metrics.salesChangePct >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />} {Math.abs(Math.round(metrics.salesChangePct))}% vs yesterday</span> : 'Same as yesterday'} />
-            <KpiCard icon={ShoppingBag} label="Total Orders" value={<AnimatedValue value={metrics.totalOrders} />} detail="Non-cancelled orders" tone="cream" />
-            <KpiCard icon={Users} label="Total Customers" value={<AnimatedValue value={metrics.totalCustomers} />} detail="Registered accounts" tone="blue" />
-            <KpiCard icon={CreditCard} label="Average Order Value" value={<AnimatedValue value={metrics.avgOrderValue} format={money} />} detail="Per order" />
-            <KpiCard icon={Check} label="Completion Rate" value={<><AnimatedValue value={metrics.completionRate} format={(v) => v.toFixed(1)} />%</>} detail="Of all orders" tone="cream" />
-          </section>
+    <section className="ad-section" aria-labelledby="today-heading">
+      <SectionHeading id="today-heading" title="Today at a glance" detail="Paid, completed sales are used for revenue." action={<Link to="/admin/reports">Open sales report <ArrowRight size={15} /></Link>} />
+      <div className="ad-kpi-grid">
+        <KpiCard icon={CircleDollarSign} label="Net sales" value={money(metrics.totalSales)} comparison={metrics.salesChangePct} detail="vs yesterday" tone="green" />
+        <KpiCard icon={ShoppingBag} label="Orders" value={metrics.totalOrders.toLocaleString()} detail={`${metrics.completedOrders} completed`} tone="cream" />
+        <KpiCard icon={WalletCards} label="Average order" value={money(metrics.avgOrderValue)} detail="Paid completed orders" tone="blue" />
+        <KpiCard icon={CheckCircle2} label="Completion rate" value={`${metrics.completionRate.toFixed(0)}%`} detail={`${metrics.cancelledOrders} cancelled today`} tone="rose" />
+      </div>
+    </section>
 
-          <section className="dashboard-grid dash-triple-grid">
-            <article className="panel dash-panel">
-              <div className="panel-head"><div><span>Sales Overview</span><small>Daily revenue trend</small></div><span className="dash-panel-tag">Last 14 Days</span></div>
-              <SalesLineChart trend={metrics.salesTrend} />
-            </article>
-
-            <article className="panel dash-panel">
-              <div className="panel-head"><div><span>Orders by Type</span><small>All orders breakdown</small></div></div>
-              <OrdersDoughnut counts={metrics.fulfillmentCounts} />
-            </article>
-
-            <article className="panel dash-panel">
-              <div className="panel-head"><div><span>Payment Methods</span><small>Revenue by payment type</small></div></div>
-              <PaymentMethodsList totals={metrics.paymentTotals} />
-            </article>
-          </section>
-
-          <section className="dash-alert-row dash-stat-row">
-            <StatCard icon={Check} tone="green" label="Completed Orders" value={metrics.completedOrders} sub={`${metrics.totalOrders ? Math.round((metrics.completedOrders / metrics.totalOrders) * 100) : 0}% of total`} />
-            <StatCard icon={Ban} tone="red" label="Cancelled Orders" value={metrics.cancelledOrders} sub={`${metrics.totalOrders ? Math.round((metrics.cancelledOrders / metrics.totalOrders) * 100) : 0}% of total`} />
-            <StatCard icon={ArrowUpRight} tone="blue" label="Refunded Orders" value={metrics.refundedOrders} sub={metrics.refundedOrders ? money(metrics.refundedAmount) : '0% of total'} />
-            <StatCard icon={UserPlus} tone="purple" label="New Customers" value={metrics.newCustomers} sub="Today" />
-            <StatCard icon={Users} tone="teal" label="Returning Customers" value={metrics.returningCustomers} sub="Today" />
-            <StatCard icon={AlertTriangle} tone="amber" label="Low Stock Items" value={metrics.lowStockItems.length} sub="View now →" href="/admin/inventory" />
-          </section>
-
-          <section className="dashboard-grid dash-triple-grid dash-bottom-grid">
-            <article className="panel dash-panel">
-              <div className="panel-head"><div><span>Best Selling Items</span></div><a className="text-link dark" href="/admin/products">View all <ArrowUpRight size={14} /></a></div>
-              {metrics.bestSellers.length === 0 ? <EmptyMini text="No sales recorded yet." /> : metrics.bestSellers.map((item, i) => (
-                <div className="rank-row dash-rank-row" key={item.name}>
-                  <span>{i + 1}</span>
-                  <div><strong>{item.name}</strong><small>Qty sold: {item.qty}</small></div>
-                  <b>{money(item.revenue)}</b>
-                </div>
-              ))}
-            </article>
-
-            <article className="panel dash-panel dash-recent-orders">
-              <div className="panel-head"><div><span>Recent Orders</span></div><a className="text-link dark" href="/admin/transactions">View all <ArrowUpRight size={14} /></a></div>
-              {metrics.recentOrders.length === 0 ? <EmptyMini text="No orders yet." /> : (
-                <div className="table-wrap">
-                  <table>
-                    <thead><tr><th>Order / ID</th><th>Type</th><th>Customer</th><th>Amount</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {metrics.recentOrders.map((o) => (
-                        <tr key={o.id} className="dash-table-row">
-                          <td><b>#{o.order_number?.split('-').pop()}</b><br /><small>{o.order_number}</small></td>
-                          <td>{FULFILLMENT_LABEL[o.order_type] || o.order_type}</td>
-                          <td>{o.customer_name || 'Walk-in Customer'}</td>
-                          <td>{money(o.final_total)}</td>
-                          <td><span className={`status status-${o.status.toLowerCase().replace(/\s+/g, '-')}`}>{o.status}</span></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </article>
-
-            <article className="panel dash-panel">
-              <div className="panel-head"><div><span>Low Stock Items</span></div><a className="text-link dark" href="/admin/inventory">View all <ArrowUpRight size={14} /></a></div>
-              {metrics.lowStockItems.length === 0 ? <EmptyMini text="All stock levels are healthy." /> : metrics.lowStockItems.slice(0, 6).map((item) => (
-                <div className="stock-row" key={item.id}>
-                  <div><b>{item.name}</b><span>{item.quantity} / {item.min} left</span></div>
-                  <div className="progress"><i className={item.quantity <= item.min * 0.5 ? 'low' : ''} style={{ width: `${Math.min(100, (item.quantity / Math.max(item.min, 1)) * 100)}%` }} /></div>
-                  <small>{item.min > 0 ? Math.round((item.quantity / item.min) * 100) : 0}%</small>
-                </div>
-              ))}
-            </article>
-          </section>
+    <section className="ad-grid ad-grid-8-4">
+      <Panel title="Live order flow" detail="Today’s orders by operational stage" action={<Link to="/staff">Open preparation <ArrowRight size={15} /></Link>} className="ad-operations-panel">
+        <OrderFlowChart counts={metrics.orderStageCounts} />
+        <div className="ad-order-list">
+          <div className="ad-list-head"><span>Recent orders</span><span>Status</span></div>
+          {metrics.recentOrders.slice(0, 5).map((order) => <div className="ad-order-row" key={order.id}>
+            <span><b>{order.order_number}</b><small>{order.customer_name || 'Walk-in customer'} · {fulfillmentLabels[order.order_type] || order.order_type}</small></span>
+            <span className={`ad-order-status is-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{order.status}</span>
+          </div>)}
         </div>
-      )}
-    </AppShell>
-  )
-}
+      </Panel>
 
-function KpiCard({ icon: Icon, label, value, detail, tone = 'sage' }) {
-  return (
-    <article className={`metric-card dash-kpi-card metric-${tone}`}>
-      <div className="dash-kpi-top"><div className="metric-icon"><Icon size={18} /></div><span>{label}</span></div>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </article>
-  )
-}
-
-function StatCard({ icon: Icon, tone, label, value, sub, href }) {
-  const Wrapper = href ? 'a' : 'div'
-  return (
-    <Wrapper className={`dash-stat-card tone-${tone}`} href={href}>
-      <div className="dash-stat-top"><div className="dash-stat-icon"><Icon size={17} /></div><b><AnimatedValue value={value} /></b></div>
-      <span>{label}</span><small>{sub}</small>
-    </Wrapper>
-  )
-}
-
-function SalesLineChart({ trend }) {
-  const [hoverIndex, setHoverIndex] = useState(null)
-  const max = Math.max(1, ...trend.map((d) => d.total))
-  const points = trend.map((d, i) => [((i / Math.max(1, trend.length - 1)) * 600), 170 - (d.total / max) * 150])
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0]},${p[1]}`).join(' ')
-  const areaPath = `${linePath} L${points[points.length - 1][0]},180 L0,180 Z`
-  const hasData = trend.some((d) => d.total > 0)
-  if (!hasData) return <EmptyMini text="No completed sales in the last 14 days." />
-  const hovered = hoverIndex !== null ? { day: trend[hoverIndex].day, total: trend[hoverIndex].total, x: points[hoverIndex][0], y: points[hoverIndex][1] } : null
-  const strokeColor = hovered ? '#2f5c46' : '#1b2f22'
-  const fillOpacity = hovered ? '.3' : '.22'
-  return (
-    <div className={`line-chart dash-line-chart${hovered ? ' is-hovering' : ''}`}>
-      <div className="grid-lines" />
-      <svg viewBox="0 0 600 180" preserveAspectRatio="none" aria-label="Daily revenue trend">
-        {hovered && <line x1={hovered.x} y1="10" x2={hovered.x} y2="180" className="dash-hover-guide" />}
-        <path d={linePath} fill="none" stroke={strokeColor} strokeWidth={hovered ? '3.5' : '3'} className="dash-sparkline" />
-        <path d={areaPath} fill="url(#dashFade)" />
-        <defs><linearGradient id="dashFade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={strokeColor} stopOpacity={fillOpacity} /><stop offset="1" stopColor={strokeColor} stopOpacity="0" /></linearGradient></defs>
-        {points.map((p, i) => (
-          <g key={trend[i].day} className={hoverIndex === i ? 'is-active' : ''}>
-            <circle cx={p[0]} cy={p[1]} r={hoverIndex === i ? 6 : 4} fill={hoverIndex === i ? strokeColor : '#fff'} stroke={strokeColor} strokeWidth={hoverIndex === i ? 3 : 2} className="dash-chart-dot" />
-            <circle
-              cx={p[0]}
-              cy={p[1]}
-              r="14"
-              fill="transparent"
-              onMouseEnter={() => setHoverIndex(i)}
-              onMouseLeave={() => setHoverIndex((h) => (h === i ? null : h))}
-              onFocus={() => setHoverIndex(i)}
-              onBlur={() => setHoverIndex((h) => (h === i ? null : h))}
-              tabIndex={0}
-              style={{ cursor: 'pointer' }}
-            />
-          </g>
-        ))}
-      </svg>
-      {hovered && (
-        <div className="dash-chart-tooltip" style={{ left: `${(hovered.x / 600) * 100}%`, top: `${(hovered.y / 180) * 100}%` }}>
-          <b>{new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric' }).format(new Date(hovered.day))}</b>
-          <span><i /> {money(hovered.total)}</span>
+      <Panel title="Customer activity" detail="Today’s customer mix and inbox workload" action={<Link to="/staff/messages">Open inbox <ArrowRight size={15} /></Link>}>
+        <CustomerMixChart newCustomers={metrics.newCustomers} returningCustomers={metrics.returningCustomers} />
+        <div className="ad-customer-stats">
+          <div><UsersRound size={17} /><span><b>{metrics.totalCustomers.toLocaleString()}</b><small>Registered customers</small></span></div>
+          <div><Mail size={17} /><span><b>{metrics.awaitingMessages.length}</b><small>Awaiting a reply</small></span></div>
+          <div><TrendingUp size={17} /><span><b>{(metrics.newCustomers + metrics.returningCustomers) ? `${Math.round((metrics.returningCustomers / (metrics.newCustomers + metrics.returningCustomers)) * 100)}%` : '0%'}</b><small>Returning rate</small></span></div>
         </div>
-      )}
-      <div className="chart-labels">{trend.filter((_, i) => i % 2 === 0).map((d) => <span key={d.day}>{new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric' }).format(new Date(d.day))}</span>)}</div>
-    </div>
-  )
+        <div className="ad-message-list">
+          {metrics.awaitingMessages.slice(0, 3).map((message) => <Link to="/staff/messages" key={message.id}><i /><span><b>{message.subject}</b><small>{message.customer_name} · {timeAgo(message.created_at)}</small></span></Link>)}
+          {!metrics.awaitingMessages.length && <EmptyState icon={CheckCircle2} text="No customer messages are waiting." />}
+        </div>
+      </Panel>
+    </section>
+
+    <section className="ad-grid ad-grid-7-5">
+      <Panel title="Sales momentum" detail="Net sales over the last 14 days" action={<Link to="/admin/trends">Explore trends <ArrowRight size={15} /></Link>}>
+        <SalesLineChart points={metrics.salesTrend} />
+      </Panel>
+      <Panel title="Most used payment methods" detail="Today’s completed payments ranked by usage">
+        <BreakdownDonut data={metrics.paymentUsage} labels={paymentLabels} colors={['#147d57', '#d1a44f', '#5f86a0', '#9a7564']} />
+      </Panel>
+    </section>
+
+    <section className="ad-grid ad-grid-7-5">
+      <Panel title="Inventory risk" detail="Low and out-of-stock items ranked by urgency" action={<Link to="/admin/inventory">Monitor inventory <ArrowRight size={15} /></Link>}>
+        <div className="ad-inventory-summary">
+          <div className="is-danger"><PackageX size={18} /><span><b>{metrics.outOfStockItems.length}</b><small>Out of stock</small></span></div>
+          <div className="is-warning"><AlertTriangle size={18} /><span><b>{Math.max(0, metrics.lowStockItems.length - metrics.outOfStockItems.length)}</b><small>Low stock</small></span></div>
+          <div className="is-info"><Clock3 size={18} /><span><b>{metrics.expiringItems.length}</b><small>Expiring soon</small></span></div>
+        </div>
+        <div className="ad-stock-list">
+          {metrics.lowStockItems.slice(0, 5).map((item) => {
+            const ratio = item.min > 0 ? Math.min(100, Math.max(0, (item.quantity / item.min) * 100)) : 100
+            return <div className="ad-stock-row" key={item.id}><span><b>{item.name}</b><small>{item.quantity} {item.unit} on hand · alert at {item.min}</small></span><div><i style={{ width: `${ratio}%` }} /></div><strong>{item.healthy > item.quantity ? `+${Math.ceil(item.healthy - item.quantity)}` : 'Review'}</strong></div>
+          })}
+          {!metrics.lowStockItems.length && <EmptyState icon={PackageCheck} text="Inventory levels are healthy." />}
+        </div>
+      </Panel>
+
+      <Panel title="Best sellers" detail="Top products by quantity sold in the last 14 days" action={<Link to="/admin/products">Product report <ArrowRight size={15} /></Link>}>
+        <RankedProducts products={metrics.bestSellers} />
+      </Panel>
+    </section>
+
+    <section className="ad-grid ad-grid-6-6">
+      <Panel title="Order channels" detail="Today’s non-cancelled orders">
+        <HorizontalBreakdown data={metrics.fulfillmentCounts} labels={fulfillmentLabels} />
+      </Panel>
+      <Panel title="Administration activity" detail="Recent recorded changes across the management portal" action={<Link to="/admin/users-access/activity">View audit trail <ArrowRight size={15} /></Link>}>
+        <div className="ad-activity-list">
+          {metrics.auditEvents.slice(0, 5).map((event) => <div key={event.id}><i className={`is-${event.severity || event.result}`} /><span><b>{event.summary}</b><small>{event.actor_name_snapshot || 'System'} · {timeAgo(event.occurred_at)}</small></span><em>{event.module?.replaceAll('_', ' ')}</em></div>)}
+          {!metrics.auditEvents.length && <EmptyState icon={UserRoundCheck} text="No recent administrative activity." />}
+        </div>
+      </Panel>
+    </section>
+  </div>
 }
 
-function OrdersDoughnut({ counts }) {
-  const [hoverKey, setHoverKey] = useState(null)
-  const entries = Object.entries(counts)
-  const total = entries.reduce((s, [, v]) => s + v, 0)
-  const r = 60, c = 2 * Math.PI * r
+function SectionHeading({ id, title, detail, action }) {
+  return <div className="ad-section-heading"><div><h2 id={id}>{title}</h2><p>{detail}</p></div>{action}</div>
+}
+
+function Panel({ title, detail, action, className = '', children }) {
+  return <article className={`ad-panel ${className}`}><header><div><h2>{title}</h2><p>{detail}</p></div>{action}</header><div className="ad-panel-body">{children}</div></article>
+}
+
+function KpiCard({ icon: Icon, label, value, comparison, detail, tone }) {
+  const up = comparison >= 0
+  return <article className={`ad-kpi-card is-${tone}`}><div className="ad-kpi-top"><span><Icon size={19} /></span><small>{label}</small></div><strong>{value}</strong><footer>{comparison !== undefined && <span className={up ? 'is-up' : 'is-down'}>{up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}{percentage(comparison)}</span>}<small>{detail}</small></footer></article>
+}
+
+function OrderFlowChart({ counts }) {
+  const total = Math.max(1, stageMeta.reduce((sum, [key]) => sum + (counts[key] || 0), 0))
+  return <div className="ad-flow-chart" role="img" aria-label="Order flow by operational stage">
+    <div className="ad-flow-track">{stageMeta.map(([key, label, Icon, color]) => <span key={key} title={`${label}: ${counts[key] || 0}`} style={{ width: `${((counts[key] || 0) / total) * 100}%`, background: color }} />)}</div>
+    <div className="ad-flow-legend">{stageMeta.map(([key, label, Icon, color]) => <div key={key}><span style={{ color, background: `${color}18` }}><Icon size={16} /></span><b>{counts[key] || 0}</b><small>{label}</small></div>)}</div>
+    {counts.overdue > 0 && <div className="ad-overdue-note"><AlertTriangle size={15} /><b>{counts.overdue} overdue</b><span>Scheduled time has passed</span></div>}
+  </div>
+}
+
+function SalesLineChart({ points }) {
+  const [activeIndex, setActiveIndex] = useState(points.length - 1)
+  const width = 760, height = 250, inset = { left: 8, right: 8, top: 18, bottom: 30 }
+  const max = Math.max(1, ...points.map((point) => point.total))
+  const x = (index) => inset.left + (index / Math.max(1, points.length - 1)) * (width - inset.left - inset.right)
+  const y = (value) => inset.top + (1 - value / max) * (height - inset.top - inset.bottom)
+  const line = points.map((point, index) => `${index ? 'L' : 'M'} ${x(index)} ${y(point.total)}`).join(' ')
+  const area = `${line} L ${x(points.length - 1)} ${height - inset.bottom} L ${x(0)} ${height - inset.bottom} Z`
+  const active = points[activeIndex]
+  const total = points.reduce((sum, point) => sum + point.total, 0)
+  return <div className="ad-sales-chart">
+    <div className="ad-chart-summary"><span><b>{money(total)}</b><small>14-day net sales</small></span>{active && <span><b>{money(active.total)}</b><small>{formatShortDate(active.day)}</small></span>}</div>
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Fourteen day net sales line chart" preserveAspectRatio="none">
+      <defs><linearGradient id="adSalesArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#147d57" stopOpacity=".28" /><stop offset="1" stopColor="#147d57" stopOpacity="0" /></linearGradient></defs>
+      {[0, .25, .5, .75, 1].map((step) => <line key={step} x1="0" x2={width} y1={inset.top + step * (height - inset.top - inset.bottom)} y2={inset.top + step * (height - inset.top - inset.bottom)} className="ad-chart-gridline" />)}
+      <path d={area} fill="url(#adSalesArea)" />
+      <path d={line} className="ad-sales-line" vectorEffect="non-scaling-stroke" />
+      {points.map((point, index) => <g key={point.day} className={activeIndex === index ? 'is-active' : ''} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)} tabIndex="0" aria-label={`${formatShortDate(point.day)}, ${money(point.total)}`}><circle cx={x(index)} cy={y(point.total)} r={activeIndex === index ? 6 : 3.5} /><rect x={Math.max(0, x(index) - 24)} y="0" width="48" height={height} fill="transparent" /></g>)}
+    </svg>
+    <div className="ad-chart-axis">{points.filter((_, index) => index % 3 === 0 || index === points.length - 1).map((point) => <span key={point.day}>{formatShortDate(point.day)}</span>)}</div>
+  </div>
+}
+
+function BreakdownDonut({ data, labels, colors }) {
+  const entries = Object.entries(data || {}).sort(([, a], [, b]) => b.count - a.count)
+  const [activeKey, setActiveKey] = useState(entries[0]?.[0] || null)
+  const total = entries.reduce((sum, [, value]) => sum + value.count, 0)
+  const totalRevenue = entries.reduce((sum, [, value]) => sum + value.revenue, 0)
+  const selected = entries.find(([key]) => key === activeKey) || entries[0]
+  const circumference = 2 * Math.PI * 55
   let offset = 0
-  const segments = total > 0 ? entries.filter(([, value]) => value > 0).map(([key, value]) => {
-    const dash = (value / total) * c
-    const startAngle = (offset / c) * 360 - 90
-    const midAngle = startAngle + ((dash / c) * 360) / 2
-    const rad = (midAngle * Math.PI) / 180
-    const seg = { key, value, dash, offset, x: 80 + r * Math.cos(rad), y: 80 + r * Math.sin(rad) }
-    offset += dash
-    return seg
-  }) : []
-  const hovered = segments.find((s) => s.key === hoverKey)
-  return (
-    <div className="dash-doughnut-wrap">
-      <div className="dash-doughnut-svg-box">
-        <svg viewBox="0 0 160 160" className="dash-doughnut">
-          <circle cx="80" cy="80" r={r} fill="none" stroke="#eef1ee" strokeWidth="20" />
-          {segments.map((s) => (
-            <circle
-              key={s.key}
-              cx="80"
-              cy="80"
-              r={r}
-              fill="none"
-              stroke={hoverKey === s.key ? FULFILLMENT_HOVER_COLOR[s.key] : FULFILLMENT_COLOR[s.key]}
-              strokeOpacity={hoverKey && hoverKey !== s.key ? 0.35 : 1}
-              strokeWidth={hoverKey === s.key ? 24 : 20}
-              strokeDasharray={`${s.dash} ${c - s.dash}`}
-              strokeDashoffset={-s.offset}
-              transform="rotate(-90 80 80)"
-              className={`dash-doughnut-seg${hoverKey === s.key ? ' is-active' : ''}${hoverKey && hoverKey !== s.key ? ' is-muted' : ''}`}
-              onMouseEnter={() => setHoverKey(s.key)}
-              onMouseLeave={() => setHoverKey((k) => (k === s.key ? null : k))}
-              onFocus={() => setHoverKey(s.key)}
-              onBlur={() => setHoverKey((k) => (k === s.key ? null : k))}
-              tabIndex={0}
-              style={{ cursor: 'pointer' }}
-            />
-          ))}
-          <text x="80" y="76" textAnchor="middle" fontSize="26" fontWeight="800" fill="#1b2f22">{total}</text>
-          <text x="80" y="96" textAnchor="middle" fontSize="11" fill="#68736b">Total</text>
+  if (!entries.length) return <EmptyState icon={CreditCard} text="No completed payments today." />
+  return <div className="ad-donut-wrap">
+    <div className="ad-donut-feature">
+      <div className="ad-donut-visual">
+        <svg viewBox="0 0 160 160" role="img" aria-label="Completed payment methods ranked by number of uses">
+          <circle cx="80" cy="80" r="55" fill="none" stroke="var(--mgmt-subtle)" strokeWidth="20" />
+          {entries.map(([key, value], index) => {
+            const pct = total ? value.count / total : 0
+            const dash = pct * circumference
+            const segment = <circle key={key} cx="80" cy="80" r="55" fill="none" stroke={colors[index % colors.length]} strokeWidth={activeKey === key ? 25 : 20} strokeOpacity={activeKey && activeKey !== key ? .38 : 1} strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} transform="rotate(-90 80 80)" tabIndex="0" onMouseEnter={() => setActiveKey(key)} onFocus={() => setActiveKey(key)}><title>{`${labels[key] || key}: ${value.count} payment${value.count === 1 ? '' : 's'}, ${money(value.revenue)}`}</title></circle>
+            offset += dash
+            return segment
+          })}
         </svg>
-        {hovered && (
-          <div className="dash-chart-tooltip" style={{ left: `${(hovered.x / 160) * 100}%`, top: `${(hovered.y / 160) * 100}%` }}>
-            <b>{FULFILLMENT_LABEL[hovered.key]}</b>
-            <span><i style={{ background: FULFILLMENT_COLOR[hovered.key] }} /> {hovered.value}</span>
-          </div>
-        )}
+        <span><b>{selected?.[1].count || 0}</b><small>{selected ? labels[selected[0]] || selected[0] : 'Payments'}</small></span>
       </div>
-      <ul className="dash-doughnut-legend">
-        {entries.map(([key, value]) => (
-          <li
-            key={key}
-            className={`${hoverKey === key ? 'is-active' : ''}${hoverKey && hoverKey !== key ? ' is-muted' : ''}`}
-            onMouseEnter={() => setHoverKey(key)}
-            onMouseLeave={() => setHoverKey((k) => (k === key ? null : k))}
-          >
-            <i style={{ background: hoverKey === key ? FULFILLMENT_HOVER_COLOR[key] : FULFILLMENT_COLOR[key] }} />
-            {FULFILLMENT_LABEL[key]}
-            <span>{value} ({total ? Math.round((value / total) * 100) : 0}%)</span>
-          </li>
-        ))}
-      </ul>
+      <div className="ad-donut-leading"><span>Most used today</span><b>{labels[entries[0][0]] || entries[0][0]}</b><small>{entries[0][1].count} of {total} completed payments</small></div>
     </div>
-  )
+    <div className="ad-donut-legend">
+      <div className="ad-donut-total"><span><b>{total}</b><small>Completed payments</small></span><strong>{money(totalRevenue)}</strong></div>
+      {entries.map(([key, value], index) => {
+        const paymentPercentage = total ? (value.count / total) * 100 : 0
+        return <button type="button" key={key} className={activeKey === key ? 'is-active' : ''} onMouseEnter={() => setActiveKey(key)} onFocus={() => setActiveKey(key)} aria-label={`${labels[key] || key}, ${value.count} payments, ${paymentPercentage.toFixed(0)} percent`}>
+          <i style={{ background: colors[index % colors.length] }} />
+          <span><b>{labels[key] || key}</b><small>{value.count} payment{value.count === 1 ? '' : 's'} · {paymentPercentage.toFixed(0)}%</small><em><i style={{ width: `${paymentPercentage}%`, background: colors[index % colors.length] }} /></em></span>
+          <strong>{money(value.revenue)}</strong>
+        </button>
+      })}
+    </div>
+  </div>
 }
 
-function PaymentMethodsList({ totals }) {
-  const entries = Object.entries(totals).sort(([, a], [, b]) => b - a)
-  const total = entries.reduce((s, [, v]) => s + v, 0)
-  if (entries.length === 0) return <EmptyMini text="No paid transactions yet today." />
-  return (
-    <>
-      <ul className="dash-payment-methods">
-        {entries.map(([method, amount]) => {
-          const Icon = PAYMENT_ICON[method] || CreditCard
-          const pct = total ? (amount / total) * 100 : 0
-          return (
-            <li key={method}>
-              <div className="dash-payment-icon"><Icon size={15} /></div>
-              <div className="dash-payment-info"><b>{PAYMENT_LABEL[method] || method}</b><span>{money(amount)}</span></div>
-              <div className="dash-payment-bar"><i style={{ width: `${pct}%` }} /></div>
-              <span className="dash-payment-pct">{pct.toFixed(1)}%</span>
-            </li>
-          )
-        })}
-      </ul>
-      <div className="dash-payment-total"><span>Total</span><b>{money(total)}</b></div>
-    </>
-  )
+function CustomerMixChart({ newCustomers, returningCustomers }) {
+  const total = newCustomers + returningCustomers
+  const returningPct = total ? (returningCustomers / total) * 100 : 0
+  return <div className="ad-customer-mix">
+    <div className="ad-mix-ring" style={{ '--mix': `${returningPct * 3.6}deg` }} role="img" aria-label={`${total} customers today: ${returningCustomers} returning and ${newCustomers} new`}><span><b>{total}</b><small>Customers today</small></span></div>
+    <div className="ad-mix-breakdown">
+      <span><i className="is-returning" /><b>{returningCustomers}</b><small>Returning · {Math.round(returningPct)}%</small></span>
+      <span><i className="is-new" /><b>{newCustomers}</b><small>New · {Math.round(100 - returningPct)}%</small></span>
+      <p><TrendingUp size={13} /> {returningPct ? `${Math.round(returningPct)}% of today’s customers are returning` : 'No returning customers yet today'}</p>
+    </div>
+  </div>
 }
 
-function EmptyMini({ text }) {
-  return <div className="dash-empty-mini"><Boxes size={20} /><p>{text}</p></div>
+function RankedProducts({ products }) {
+  const max = Math.max(1, ...products.map((item) => item.qty))
+  return <div className="ad-ranked-list">{products.length ? products.map((item, index) => <div key={item.name}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.qty} sold · {money(item.revenue)}</small><i><em style={{ width: `${(item.qty / max) * 100}%` }} /></i></div></div>) : <EmptyState icon={Coffee} text="No completed product sales yet." />}</div>
+}
+
+function HorizontalBreakdown({ data, labels }) {
+  const entries = Object.entries(data).filter(([, value]) => value > 0).sort(([, a], [, b]) => b - a)
+  const max = Math.max(1, ...entries.map(([, value]) => value))
+  const total = entries.reduce((sum, [, value]) => sum + value, 0)
+  return <div className="ad-horizontal-bars" role="img" aria-label="Order count by fulfillment channel">{entries.length ? entries.map(([key, value]) => <div key={key}><span><b>{labels[key] || key}</b><small>{total ? `${((value / total) * 100).toFixed(0)}%` : '0%'}</small></span><i><em style={{ width: `${(value / max) * 100}%` }} /></i><strong>{value}</strong></div>) : <EmptyState icon={ReceiptText} text="No orders have been recorded today." />}</div>
+}
+
+function EmptyState({ icon: Icon, text }) {
+  return <div className="ad-empty"><Icon size={20} /><span>{text}</span></div>
 }
 
 function DashboardSkeleton() {
-  return (
-    <div className="dash-skeleton">
-      <div className="metrics dash-kpi-row">{Array.from({ length: 5 }).map((_, i) => <div className="inv-skeleton-row dash-skel-card" key={i} />)}</div>
-      <div className="dashboard-grid dash-triple-grid">
-        <div className="inv-skeleton-row dash-skel-panel" />
-        <div className="inv-skeleton-row dash-skel-panel" />
-        <div className="inv-skeleton-row dash-skel-panel" />
-      </div>
-      <div className="dash-alert-row dash-stat-row">{Array.from({ length: 6 }).map((_, i) => <div className="inv-skeleton-row dash-skel-stat" key={i} />)}</div>
-    </div>
-  )
+  return <div className="ad-skeleton" aria-label="Loading dashboard"><i className="wide" /><div>{Array.from({ length: 6 }).map((_, index) => <i key={index} />)}</div><div>{Array.from({ length: 4 }).map((_, index) => <i key={index} />)}</div><i className="tall" /><i className="tall" /></div>
 }

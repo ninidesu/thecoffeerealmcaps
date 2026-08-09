@@ -69,98 +69,14 @@ export async function fetchFinishedProducts() {
   }))
 }
 
-// Supplies keep inactive records in the list so they can be shown with an
-// "Inactive" status, rather than silently vanishing the way an archived
-// ingredient does. Last Restocked / Updated By are derived from
-// supply_movements — no extra columns needed on the table itself.
-export async function fetchSupplies() {
-  const [{ data, error }, { data: movements, error: movementError }] = await Promise.all([
-    supabase
-      .from('supplies')
-      .select('id,name,category,unit,quantity,min_stock_level,high_stock_level,supplier,notes,is_archived,updated_at'),
-    supabase
-      .from('supply_movements')
-      .select('supply_id,movement_type,created_at,profiles(full_name)')
-      .order('created_at', { ascending: false })
-      .limit(1000),
-  ])
-  if (error) throw error
-  if (movementError && movementError.code !== '42P01') throw movementError
-
-  const latest = new Map()
-  const latestRestock = new Map()
-  ;(movements || []).forEach((row) => {
-    if (!latest.has(row.supply_id)) {
-      latest.set(row.supply_id, { at: row.created_at, by: row.profiles?.full_name || 'System' })
-    }
-    if (row.movement_type === 'restock' && !latestRestock.has(row.supply_id)) {
-      latestRestock.set(row.supply_id, row.created_at)
-    }
-  })
-
-  return (data || []).map((row) => ({
-    id: row.id,
-    name: row.name,
-    category: row.category,
-    unit: row.unit,
-    supplier: row.supplier,
-    notes: row.notes,
-    quantity: Number(row.quantity),
-    minStockLevel: Number(row.min_stock_level),
-    highStockLevel: Number(row.high_stock_level),
-    updatedAt: row.updated_at,
-    isArchived: Boolean(row.is_archived),
-    lastRestockedAt: latestRestock.get(row.id) || null,
-    updatedBy: latest.get(row.id)?.by || '—',
-    itemType: 'supply',
-  }))
-}
-
-// Which products consume which supplies, and under what conditions. Reads
-// the same menu_item_supplies rows the deduction pass spends from.
-export async function fetchSupplyMatrix() {
-  const { data, error } = await supabase
-    .from('menu_item_supplies')
-    .select('id,menu_item_id,supply_id,quantity_per_serving,applies_to_temperature,applies_to_service,note')
-  if (error) {
-    // Table absent means the supply-tracking migration has not been applied
-    // yet; the rest of the module must still load.
-    if (error.code === '42P01' || error.code === 'PGRST205') return []
-    throw error
-  }
-  return (data || []).map((row) => ({
-    id: row.id,
-    menuItemId: row.menu_item_id,
-    supplyId: row.supply_id,
-    quantityPerServing: Number(row.quantity_per_serving || 0),
-    temperature: row.applies_to_temperature,
-    service: row.applies_to_service,
-    note: row.note || '',
-  }))
-}
-
-export async function setMenuItemSupplies(menuItemId, supplies) {
-  const { error } = await supabase.rpc('staff_set_menu_item_supplies', {
-    p_menu_item_id: menuItemId || null,
-    p_supplies: supplies.map((s) => ({
-      supply_id: s.supplyId,
-      quantity_per_serving: s.quantityPerServing,
-      applies_to_temperature: s.temperature || null,
-      applies_to_service: s.service || null,
-      note: s.note || null,
-    })),
-  })
-  if (error) throw error
-}
-
 export async function fetchMenuItemOptions() {
   const { data, error } = await supabase.from('menu_items').select('id,name,variant_options').eq('is_archived', false).order('name')
   if (error) throw error
   return data || []
 }
 
-const MOVEMENT_TABLES = { ingredient: 'inventory_movements', finished_product: 'finished_product_movements', supply: 'supply_movements' }
-const MOVEMENT_ID_COLUMNS = { ingredient: 'ingredient_id', finished_product: 'finished_product_id', supply: 'supply_id' }
+const MOVEMENT_TABLES = { ingredient: 'inventory_movements', finished_product: 'finished_product_movements' }
+const MOVEMENT_ID_COLUMNS = { ingredient: 'ingredient_id', finished_product: 'finished_product_id' }
 
 export async function fetchMovements(itemType, itemId) {
   const table = MOVEMENT_TABLES[itemType]
@@ -215,10 +131,10 @@ export async function fetchRecipeMatrix() {
   }
 }
 
-// Merged recent movement feed across all three item types, newest first.
+// Merged recent movement feed across ingredients and finished products, newest first.
 export async function fetchRecentActivity(limit = 40) {
   const per = Math.max(10, Math.ceil(limit / 2))
-  const [ingredient, finished, supply] = await Promise.all([
+  const [ingredient, finished] = await Promise.all([
     supabase
       .from('inventory_movements')
       .select('id,movement_type,quantity,reason,order_id,created_at,ingredients(name,unit),profiles(full_name)')
@@ -229,19 +145,9 @@ export async function fetchRecentActivity(limit = 40) {
       .select('id,movement_type,quantity,reason,created_at,finished_products(name,unit),profiles(full_name)')
       .order('created_at', { ascending: false })
       .limit(per),
-    supabase
-      .from('supply_movements')
-      .select('id,movement_type,quantity,reason,order_id,created_at,supplies(name,unit),profiles(full_name)')
-      .order('created_at', { ascending: false })
-      .limit(per),
   ])
   if (ingredient.error) throw ingredient.error
   if (finished.error) throw finished.error
-  // supply_movements.order_id only exists once the supply-tracking migration
-  // has run. Degrade to an empty supply feed rather than blanking the whole
-  // page if it has not been applied yet.
-  if (supply.error && supply.error.code !== '42703' && supply.error.code !== 'PGRST204') throw supply.error
-  const supplyRows = supply.error ? [] : (supply.data || [])
 
   const normalizeRow = (row, itemType, item) => ({
     id: `${itemType}-${row.id}`,
@@ -259,7 +165,6 @@ export async function fetchRecentActivity(limit = 40) {
   return [
     ...(ingredient.data || []).map((row) => normalizeRow(row, 'ingredient', row.ingredients)),
     ...(finished.data || []).map((row) => normalizeRow(row, 'finished_product', row.finished_products)),
-    ...supplyRows.map((row) => normalizeRow(row, 'supply', row.supplies)),
   ]
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, limit)
@@ -303,21 +208,6 @@ export async function upsertFinishedProduct(payload) {
 }
 export async function archiveFinishedProduct(id) {
   const { error } = await supabase.rpc('staff_archive_finished_product', { p_id: id })
-  if (error) throw error
-}
-
-export async function upsertSupply(payload) {
-  const normalized = normalizeInventoryPayload(payload)
-  const { data, error } = await supabase.rpc('staff_upsert_supply', {
-    p_id: normalized.id || null, p_name: normalized.name, p_category: normalized.category || null,
-    p_unit: normalized.unit, p_min: normalized.minStockLevel, p_high: normalized.highStockLevel,
-    p_supplier: normalized.supplier || null, p_notes: normalized.notes || null, p_initial_quantity: normalized.initialQuantity,
-  })
-  if (error) throw error
-  return data
-}
-export async function archiveSupply(id) {
-  const { error } = await supabase.rpc('staff_archive_supply', { p_id: id })
   if (error) throw error
 }
 

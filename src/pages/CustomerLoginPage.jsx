@@ -1,6 +1,7 @@
 import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck, User, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { isCustomerRole, normalizeRole, roleRoutes } from '../lib/auth'
 import { queueAuthWelcome } from '../lib/authFeedback'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
@@ -61,8 +62,30 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     if (!email || !password) return setAuthError('Please enter your email and password.')
     setLoading(true)
     const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      setLoading(false)
+      return setAuthError(error.message)
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', authData.user.id)
+      .maybeSingle()
     setLoading(false)
-    if (error) return setAuthError(error.message)
+
+    if (profileError || !profile) {
+      await supabase.auth.signOut()
+      return setAuthError('We could not verify this customer account. Please try again or contact support.')
+    }
+
+    if (!isCustomerRole(profile.role)) {
+      const portalRoute = roleRoutes[normalizeRole(profile.role)]
+      if (portalRoute) return navigate(portalRoute, { replace: true })
+      await supabase.auth.signOut()
+      return setAuthError('This account is not registered as a customer. Please use the correct sign-in portal.')
+    }
+
     queueAuthWelcome(authData?.user?.user_metadata)
     navigate(location.state?.from || '/menu')
   }

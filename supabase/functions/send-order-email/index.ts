@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import nodemailer from "npm:nodemailer@7.0.5";
 
 type EmailType = "order_confirmed" | "order_completed" | "receipt";
 
@@ -46,7 +47,7 @@ const storeProfile = {
     Deno.env.get("STORE_ADDRESS") ||
     "Lot 1 Block 210 Mark Street corner Dollar Street, Quezon City",
   contact: Deno.env.get("STORE_CONTACT") || "+63 997 533 7958",
-  fromEmail: Deno.env.get("MAIL_FROM_EMAIL") || "",
+  fromEmail: Deno.env.get("GMAIL_SMTP_USER") || "",
   fromName: Deno.env.get("MAIL_FROM_NAME") || "thecoffeerealm",
   bannerImage:
     Deno.env.get("MAIL_BANNER_IMAGE") ||
@@ -319,46 +320,43 @@ const buildReceiptHtml = (order: OrderEmailPayload["order"] = {}) => {
 </html>`;
 };
 
-const sendWithResend = async (payload: {
+const sendWithGmail = async (payload: {
   to: string;
   subject: string;
   html: string;
   receiptHtml?: string;
 }) => {
-  const apiKey = Deno.env.get("RESEND_API_KEY");
-  if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
-  if (!storeProfile.fromEmail) throw new Error("MAIL_FROM_EMAIL is not configured.");
+  const gmailAppPassword = Deno.env.get("GMAIL_SMTP_APP_PASSWORD") || "";
+  if (!storeProfile.fromEmail) throw new Error("GMAIL_SMTP_USER is not configured.");
+  if (!gmailAppPassword) throw new Error("GMAIL_SMTP_APP_PASSWORD is not configured.");
 
   const attachments = payload.receiptHtml
     ? [
         {
           filename: "thecoffeerealm-receipt.html",
-          content: btoa(unescape(encodeURIComponent(payload.receiptHtml))),
+          content: payload.receiptHtml,
+          contentType: "text/html; charset=utf-8",
         },
       ]
     : [];
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const transport = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: {
+      user: storeProfile.fromEmail,
+      pass: gmailAppPassword,
     },
-    body: JSON.stringify({
-      from: `${storeProfile.fromName} <${storeProfile.fromEmail}>`,
-      to: [payload.to],
-      subject: payload.subject,
-      html: payload.html,
-      attachments,
-    }),
   });
 
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(`Email provider rejected the request: ${message}`);
-  }
-
-  return response.json();
+  return transport.sendMail({
+    from: `${storeProfile.fromName} <${storeProfile.fromEmail}>`,
+    to: payload.to,
+    subject: payload.subject,
+    html: payload.html,
+    attachments,
+  });
 };
 
 const authorizeStaff = async (req: Request) => {
@@ -418,7 +416,7 @@ serve(async (req) => {
         ? receiptHtml
         : buildOrderEmailHtml({ type, order });
 
-    const result = await sendWithResend({
+    const result = await sendWithGmail({
       to,
       subject,
       html,

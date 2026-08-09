@@ -6,7 +6,7 @@ A clean React + Vite + Supabase rebuild of the legacy thecoffeerealm system. The
 
 This project includes the public Supabase project URL and anon key fallback in `src/lib/supabase.js`, so a fresh clone can connect to the existing Supabase project immediately after `npm install`.
 
-Private backend secrets, such as service-role keys, SMTP passwords, and Resend keys, are not committed. Add those in Supabase Edge Function secrets when deploying backend functions.
+Private backend secrets, such as service-role keys and Gmail SMTP app passwords, are not committed. Add those in Supabase Edge Function secrets when deploying backend functions.
 
 ## Included routes
 

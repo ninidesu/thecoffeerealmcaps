@@ -1,7 +1,8 @@
 import { supabase } from '../lib/supabase'
 
 const ORDER_SELECT = `id,order_number,order_type,order_source,status,customer_name,customer_id,final_total,discount_amount,delivery_fee,
-  payment_status,payment_confirmed,refund_status,is_voided,created_at,
+  payment_status,payment_confirmed,payment_proof_path,refund_status,is_voided,created_at,updated_at,
+  schedule_date,schedule_time,cancellation_status,fulfillment_hold,cancellation_requested_at,
   order_items(item_name,display_name,quantity,line_total),
   payments(method,status)`
 
@@ -12,7 +13,7 @@ function dayStart(offsetDays = 0) {
   return d
 }
 function isoDay(date) {
-  return date.toISOString().slice(0, 10)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 export async function fetchDashboardData() {
@@ -25,17 +26,21 @@ export async function fetchDashboardData() {
     { count: totalCustomers, error: customerCountError },
     { data: ingredients, error: ingredientsError },
     { data: finishedProducts, error: finishedError },
-    { data: supplies, error: suppliesError },
     { data: menuItems, error: menuError },
+    { data: customerMessages },
+    { data: auditEvents },
+    { data: portalConfiguration },
   ] = await Promise.all([
     supabase.from('orders').select(ORDER_SELECT).gte('created_at', windowStart.toISOString()).order('created_at', { ascending: true }),
     supabase.from('refunds').select('id,order_id,refund_status,refund_amount,requested_at,processed_at'),
     supabase.from('orders').select('customer_id,created_at').not('customer_id', 'is', null),
     supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'customer'),
-    supabase.from('ingredients').select('id,name,is_archived,inventory_stock(quantity,min_stock_level)').eq('is_archived', false),
-    supabase.from('finished_products').select('id,name,quantity,min_stock_level,is_archived').eq('is_archived', false),
-    supabase.from('supplies').select('id,name,quantity,min_stock_level,is_archived').eq('is_archived', false),
-    supabase.from('menu_items').select('id,name,is_available,is_archived').eq('is_archived', false),
+    supabase.from('ingredients').select('id,name,unit,supplier,expiration_date,is_archived,inventory_stock(quantity,min_stock_level,high_stock_level)').eq('is_archived', false),
+    supabase.from('finished_products').select('id,name,unit,quantity,min_stock_level,high_stock_level,supplier,expiration_date,is_archived').eq('is_archived', false),
+    supabase.from('menu_items').select('id,name,is_available,manual_available,unavailable_reason,is_archived').eq('is_archived', false),
+    supabase.from('customer_messages').select('id,customer_name,subject,category,status,created_at').order('created_at', { ascending: false }).limit(100),
+    supabase.from('portal_audit_events').select('id,occurred_at,actor_name_snapshot,module,summary,result,severity').order('occurred_at', { ascending: false }).limit(12),
+    supabase.from('portal_configuration').select('key,value,updated_at').eq('scope', 'system'),
   ])
   if (ordersError) throw ordersError
   if (refundsError && refundsError.code !== '42P01') throw refundsError
@@ -43,7 +48,6 @@ export async function fetchDashboardData() {
   if (customerCountError) throw customerCountError
   if (ingredientsError) throw ingredientsError
   if (finishedError) throw finishedError
-  if (suppliesError) throw suppliesError
   if (menuError) throw menuError
 
   return {
@@ -53,8 +57,10 @@ export async function fetchDashboardData() {
     totalCustomers: totalCustomers ?? 0,
     ingredients: ingredients || [],
     finishedProducts: finishedProducts || [],
-    supplies: supplies || [],
     menuItems: menuItems || [],
+    customerMessages: customerMessages || [],
+    auditEvents: auditEvents || [],
+    portalConfiguration: portalConfiguration || [],
   }
 }
 
@@ -69,12 +75,15 @@ function salesOf(orders) {
 }
 
 export function computeDashboardMetrics(raw) {
-  const { orders, refunds, allCustomerOrders, totalCustomers, ingredients, finishedProducts, supplies, menuItems } = raw
+  const {
+    orders, refunds, allCustomerOrders, totalCustomers, ingredients, finishedProducts, menuItems,
+    customerMessages = [], auditEvents = [], portalConfiguration = [],
+  } = raw
 
   const today = isoDay(dayStart(0))
   const yesterday = isoDay(dayStart(-1))
-  const todayOrders = orders.filter((o) => o.created_at.slice(0, 10) === today)
-  const yesterdayOrders = orders.filter((o) => o.created_at.slice(0, 10) === yesterday)
+  const todayOrders = orders.filter((o) => isoDay(new Date(o.created_at)) === today)
+  const yesterdayOrders = orders.filter((o) => isoDay(new Date(o.created_at)) === yesterday)
 
   const countedToday = todayOrders.filter(isCounted)
   const totalSales = salesOf(todayOrders)
@@ -88,20 +97,27 @@ export function computeDashboardMetrics(raw) {
   const avgOrderValue = paidCompletedToday.length ? totalSales / paidCompletedToday.length : 0
   const completionRate = totalOrders ? (completedOrders / totalOrders) * 100 : 0
 
-  const refundedToday = refunds.filter((r) => r.refund_status === 'processed' && r.processed_at?.slice(0, 10) === today)
+  const refundedToday = refunds.filter((r) => r.refund_status === 'processed' && r.processed_at && isoDay(new Date(r.processed_at)) === today)
   const refundedOrders = refundedToday.length
   const refundedAmount = refundedToday.reduce((s, r) => s + Number(r.refund_amount || 0), 0)
 
-  const lowStockItems = [
-    ...ingredients.map((i) => ({ id: i.id, name: i.name, unit: 'unit', quantity: Number(i.inventory_stock?.[0]?.quantity ?? 0), min: Number(i.inventory_stock?.[0]?.min_stock_level ?? 0) })),
-    ...finishedProducts.map((p) => ({ id: p.id, name: p.name, unit: 'unit', quantity: Number(p.quantity), min: Number(p.min_stock_level) })),
-    ...supplies.map((s) => ({ id: s.id, name: s.name, unit: 'unit', quantity: Number(s.quantity), min: Number(s.min_stock_level) })),
-  ].filter((i) => i.min > 0 && i.quantity <= i.min)
+  const inventoryItems = [
+    ...ingredients.map((i) => ({ id: i.id, name: i.name, unit: i.unit || 'unit', supplier: i.supplier || '', expirationDate: i.expiration_date, quantity: Number(i.inventory_stock?.[0]?.quantity ?? 0), min: Number(i.inventory_stock?.[0]?.min_stock_level ?? 0), healthy: Number(i.inventory_stock?.[0]?.high_stock_level ?? 0) })),
+    ...finishedProducts.map((p) => ({ id: p.id, name: p.name, unit: p.unit || 'unit', supplier: p.supplier || '', expirationDate: p.expiration_date, quantity: Number(p.quantity), min: Number(p.min_stock_level), healthy: Number(p.high_stock_level) })),
+  ]
+  const lowStockItems = inventoryItems.filter((i) => i.min > 0 && i.quantity <= i.min).sort((a, b) => (a.quantity / a.min) - (b.quantity / b.min))
+  const outOfStockItems = lowStockItems.filter((item) => item.quantity <= 0)
+  const expiringItems = inventoryItems.filter((item) => {
+    if (!item.expirationDate) return false
+    const days = (new Date(item.expirationDate) - dayStart(0)) / 86400000
+    return days >= 0 && days <= 7
+  })
   const unavailableMenuItems = menuItems.filter((m) => !m.is_available).length
+  const stockBlockedMenuItems = menuItems.filter((m) => ['missing_ingredient', 'insufficient_stock'].includes(m.unavailable_reason)).length
 
   const salesByDay = new Map()
   orders.filter(isPaidCompleted).forEach((o) => {
-    const day = o.created_at.slice(0, 10)
+    const day = isoDay(new Date(o.created_at))
     salesByDay.set(day, (salesByDay.get(day) || 0) + Number(o.final_total || 0))
   })
   const salesTrend = []
@@ -114,9 +130,15 @@ export function computeDashboardMetrics(raw) {
   countedToday.forEach((o) => { fulfillmentCounts[o.order_type] = (fulfillmentCounts[o.order_type] || 0) + 1 })
 
   const paymentTotals = {}
+  const paymentUsage = {}
   paidCompletedToday.forEach((o) => {
     const method = o.payments?.[0]?.method || 'other'
-    paymentTotals[method] = (paymentTotals[method] || 0) + Number(o.final_total || 0)
+    const amount = Number(o.final_total || 0)
+    paymentTotals[method] = (paymentTotals[method] || 0) + amount
+    const usage = paymentUsage[method] || { count: 0, revenue: 0 }
+    usage.count += 1
+    usage.revenue += amount
+    paymentUsage[method] = usage
   })
 
   const itemAgg = new Map()
@@ -133,6 +155,31 @@ export function computeDashboardMetrics(raw) {
 
   const recentOrders = [...orders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6)
 
+  const attentionOrders = orders.filter((order) => {
+    const awaitingPayment = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation'].includes(order.status)
+      && ((order.payment_proof_path && !order.payment_confirmed) || order.payments?.[0]?.method === 'cod')
+    return awaitingPayment || order.cancellation_status === 'requested' || order.fulfillment_hold
+  })
+  const orderStageCounts = { pending: 0, preparing: 0, ready: 0, delivery: 0, completed: 0, overdue: 0 }
+  countedToday.forEach((order) => {
+    if (['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation', 'Confirmed'].includes(order.status)) orderStageCounts.pending += 1
+    else if (order.status === 'Preparing') orderStageCounts.preparing += 1
+    else if (order.status === 'Ready for Pickup') orderStageCounts.ready += 1
+    else if (order.status === 'Out for Delivery') orderStageCounts.delivery += 1
+    else if (order.status === 'Completed') orderStageCounts.completed += 1
+    if (order.schedule_date && order.schedule_time && !['Completed', 'Cancelled'].includes(order.status)) {
+      const scheduled = new Date(`${order.schedule_date}T${order.schedule_time}`)
+      if (!Number.isNaN(scheduled.getTime()) && scheduled < new Date()) orderStageCounts.overdue += 1
+    }
+  })
+
+  const pendingRefunds = refunds.filter((refund) => ['pending_review', 'pending', 'approved', 'processing', 'failed'].includes(refund.refund_status))
+  const pendingRefundAmount = pendingRefunds.reduce((sum, refund) => sum + Number(refund.refund_amount || 0), 0)
+  const awaitingMessages = customerMessages.filter((message) => message.status !== 'replied')
+  const messagesToday = customerMessages.filter((message) => message.created_at && isoDay(new Date(message.created_at)) === today).length
+  const criticalAuditEvents = auditEvents.filter((event) => event.severity === 'critical' || event.result === 'failed')
+  const orderingConfig = portalConfiguration.find((entry) => entry.key === 'ordering')?.value || {}
+
   const firstOrderByCustomer = new Map()
   allCustomerOrders.forEach((o) => {
     const existing = firstOrderByCustomer.get(o.customer_id)
@@ -142,7 +189,7 @@ export function computeDashboardMetrics(raw) {
   let newCustomers = 0, returningCustomers = 0
   customersToday.forEach((id) => {
     const firstOrder = firstOrderByCustomer.get(id)
-    if (firstOrder && firstOrder.slice(0, 10) === today) newCustomers += 1
+    if (firstOrder && isoDay(new Date(firstOrder)) === today) newCustomers += 1
     else returningCustomers += 1
   })
 
@@ -150,7 +197,10 @@ export function computeDashboardMetrics(raw) {
     totalSales, salesChangePct, totalOrders, avgOrderValue, completionRate,
     totalCustomers,
     completedOrders, cancelledOrders, refundedOrders, refundedAmount,
-    lowStockItems, unavailableMenuItems,
-    salesTrend, fulfillmentCounts, paymentTotals, bestSellers, recentOrders, newCustomers, returningCustomers,
+    lowStockItems, outOfStockItems, expiringItems, unavailableMenuItems, stockBlockedMenuItems,
+    salesTrend, fulfillmentCounts, paymentTotals, paymentUsage, bestSellers, recentOrders, newCustomers, returningCustomers,
+    attentionOrders, orderStageCounts, pendingRefunds, pendingRefundAmount,
+    awaitingMessages, messagesToday, auditEvents, criticalAuditEvents,
+    storeStatus: orderingConfig.storeStatus || 'open',
   }
 }

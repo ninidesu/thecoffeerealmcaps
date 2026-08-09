@@ -8,10 +8,11 @@ import { money } from '../utils/money'
 import { describeError } from '../utils/describeError'
 import {
   fetchOpsOrders, fetchAddonNameMap, confirmOrder, advanceOrderStatus,
-  cancelOrder, resolveCancellation, getPaymentProofUrl,
+  cancelOrder, reviewCancellation, resolveCancellation, completeCancellationRefund, getPaymentProofUrl,
 } from '../services/opsOrderService'
 import { getCurrentPortalSession } from '../lib/auth'
 import { fetchStaffPreferences, getRememberedStaffFilters, rememberStaffFilters, shouldShowSystemNotification } from '../services/staffSettingsService'
+import { useManagementSessionState } from '../hooks/useManagementSessionState'
 
 const PENDING_STATUSES = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation']
 
@@ -76,12 +77,45 @@ function scheduleLabel(order) {
   return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(when)
 }
 function filterDateFor(order, view) {
-  const date = view === 'cancelled' ? order.cancelled_at || order.created_at : order.schedule_date
+  const date = view === 'cancelled' ? order.cancellation_requested_at || order.cancelled_at || order.created_at : order.schedule_date
   if (!date) return ''
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date(date).toLocaleDateString('en-CA')
 }
 
+function cancellationPaymentState(order) {
+  const method = paymentMethod(order)
+  const payment = order.payments?.[0]
+  const paid = order.payment_confirmed || order.payment_status === 'paid' || payment?.status === 'paid'
+  if (paid) return 'paid'
+  if (method !== 'cod' && order.payment_proof_path) return 'proof_pending'
+  return 'unpaid'
+}
+
+function cancellationRequested(order) {
+  return order.cancellation_status === 'requested' || Boolean(order.fulfillment_hold)
+}
+
+function cancellationStartedByStaff(order) {
+  return order.cancellation_requested_by_role === 'Operations Staff'
+    || order.cancelled_by_role === 'Operations Staff'
+}
+
+function refundStatusLabel(value) {
+  return value === 'pending_review' ? 'Payment review pending'
+    : value === 'pending' ? 'Refund pending'
+    : value === 'processing' ? 'Refund processing'
+    : value === 'processed' ? 'Refund completed'
+    : value === 'failed' ? 'Refund needs attention'
+    : value === 'rejected' ? 'Refund rejected'
+    : 'No refund required'
+}
+
+function actionableRefund(order) {
+  return (order.refunds || []).find((refund) => ['pending', 'approved', 'processing', 'failed'].includes(refund.refund_status)) || null
+}
+
 function mainActionFor(order) {
+  if (cancellationRequested(order)) return null
   const stage = stageOf(order)
   const method = paymentMethod(order)
   if (stage === 'pending') {
@@ -106,10 +140,12 @@ export default function OrderPreparationPage() {
   const [now, setNow] = useState(() => new Date())
   const [busyId, setBusyId] = useState('')
   const [toasts, setToasts] = useState([])
-  const [drawerOrder, setDrawerOrder] = useState(null)
-  const [confirmAction, setConfirmAction] = useState(null)
-  const [cancelTarget, setCancelTarget] = useState(null)
-  const [mobileStage, setMobileStage] = useState('pending')
+  const [drawerOrder, setDrawerOrder] = useManagementSessionState('staff:orders:drawer', null)
+  const [confirmAction, setConfirmAction] = useManagementSessionState('staff:orders:confirmation', null)
+  const [cancelTarget, setCancelTarget] = useManagementSessionState('staff:orders:cancellation', null)
+  const [reviewTarget, setReviewTarget] = useManagementSessionState('staff:orders:review', null)
+  const [refundTarget, setRefundTarget] = useManagementSessionState('staff:orders:refund-completion', null)
+  const [mobileStage, setMobileStage] = useManagementSessionState('staff:orders:mobile-stage', 'pending')
   const [activeTab, setActiveTab] = useState('active')
 
   const [search, setSearch] = useState('')
@@ -198,13 +234,56 @@ export default function OrderPreparationPage() {
     if (busyId) return
     setBusyId(order.id)
     try {
-      await cancelOrder(order.id, reason)
-      patchOrder(order.id, { status: 'Cancelled', cancellation_reason: reason, cancelled_by_role: 'Operations Staff', cancellation_resolved: false })
-      pushToast('success', `${order.order_number} was cancelled.`)
+      const result = await cancelOrder(order.id, reason)
+      const requested = result.action === 'review_requested'
+      patchOrder(order.id, requested
+        ? { cancellation_status: 'requested', fulfillment_hold: true, cancellation_reason: reason, cancellation_requested_by_role: 'Operations Staff', cancellation_requested_at: new Date().toISOString(), refund_status: 'pending_review' }
+        : { status: 'Cancelled', cancellation_status: 'resolved', fulfillment_hold: false, cancellation_reason: reason, cancelled_by_role: 'Operations Staff', cancelled_at: new Date().toISOString(), cancellation_resolved: true, refund_status: 'not_applicable' })
+      pushToast('success', requested
+        ? `${order.order_number} is on hold for payment and refund review.${result.email?.ok ? ' Customer email sent.' : ' Email queued for retry.'}`
+        : `${order.order_number} was cancelled.${result.email?.ok ? ' Customer email sent.' : ' Email queued for retry.'}`)
       setCancelTarget(null)
       setDrawerOrder(null)
+      return true
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not cancel this order.'))
+      return false
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  const runReview = async ({ order, approve, notes, paymentOutcome }) => {
+    if (busyId) return
+    setBusyId(order.id)
+    try {
+      const result = await reviewCancellation({ orderId: order.id, approve, notes, paymentOutcome })
+      if (!approve) {
+        patchOrder(order.id, { cancellation_status: 'rejected', fulfillment_hold: false, cancellation_review_notes: notes, refund_status: 'not_applicable' })
+        pushToast('success', `${order.order_number} will continue.${result.email?.ok ? ' Customer email sent.' : ' Email queued for retry.'}`)
+      } else {
+        const refundPending = result.action === 'refund_pending'
+        patchOrder(order.id, {
+          status: 'Cancelled', cancellation_status: refundPending ? 'cancelled' : 'resolved', fulfillment_hold: false,
+          cancellation_review_notes: notes, cancelled_by_role: order.cancellation_requested_by_role || 'Operations Staff',
+          cancelled_at: new Date().toISOString(), cancellation_resolved: !refundPending,
+          refund_status: refundPending ? 'pending' : 'not_applicable',
+          payment_status: paymentOutcome === 'received' ? 'paid' : order.payment_status,
+          payment_confirmed: paymentOutcome === 'received' ? true : order.payment_confirmed,
+          refunds: refundPending && result.refund_id
+            ? [...(order.refunds || []), { id: result.refund_id, refund_amount: Number(order.final_total || 0), refund_status: 'pending', refund_method: paymentMethod(order), reference_number: null }]
+            : (order.refunds || []),
+        })
+        pushToast('success', refundPending
+          ? `${order.order_number} was cancelled and its refund is pending.${result.email?.ok ? ' Customer email sent.' : ' Email queued for retry.'}`
+          : `${order.order_number} was cancelled without a refund.${result.email?.ok ? ' Customer email sent.' : ' Email queued for retry.'}`)
+      }
+      setReviewTarget(null)
+      setDrawerOrder(null)
+      return true
+    } catch (cause) {
+      pushToast('error', describeError(cause, 'Could not review this cancellation.'))
+      return false
     } finally {
       setBusyId('')
     }
@@ -219,6 +298,28 @@ export default function OrderPreparationPage() {
       pushToast('success', `${order.order_number} marked as resolved.`)
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not resolve this cancellation.'))
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  const runCompleteRefund = async ({ order, refund, referenceNumber }) => {
+    if (busyId) return
+    setBusyId(refund.id)
+    try {
+      const result = await completeCancellationRefund({ orderId: order.id, refundId: refund.id, referenceNumber })
+      patchOrder(order.id, {
+        refund_status: 'processed',
+        cancellation_status: 'resolved',
+        cancellation_resolved: true,
+        refunds: (order.refunds || []).map((entry) => entry.id === refund.id
+          ? { ...entry, refund_status: 'processed', reference_number: referenceNumber, processed_at: new Date().toISOString() }
+          : entry),
+      })
+      setRefundTarget(null)
+      pushToast('success', `${order.order_number} refund completed.${result.email?.ok ? ' Customer email sent.' : ' Email queued for retry.'}`)
+    } catch (cause) {
+      pushToast('error', describeError(cause, 'Could not complete this refund.'))
     } finally {
       setBusyId('')
     }
@@ -244,7 +345,7 @@ export default function OrderPreparationPage() {
   const sorted = useMemo(() => {
     const list = [...filtered]
     const eventTime = (order) => activeTab === 'cancelled'
-      ? new Date(order.cancelled_at || order.created_at).getTime()
+      ? new Date(order.cancellation_requested_at || order.cancelled_at || order.created_at).getTime()
       : scheduleDate(order)?.getTime() || 0
     if (sortBy === 'newest') list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     else if (sortBy === 'oldest') list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
@@ -255,16 +356,17 @@ export default function OrderPreparationPage() {
     return list
   }, [filtered, sortBy, activeTab])
 
-  const activeColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key && !isScheduledOrder(o, now)) })), [sorted, now])
-  const scheduledColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key && isScheduledOrder(o, now)) })), [sorted, now])
+  const activeColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key && !cancellationRequested(o) && !isScheduledOrder(o, now)) })), [sorted, now])
+  const scheduledColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key && !cancellationRequested(o) && isScheduledOrder(o, now)) })), [sorted, now])
   const visibleColumns = activeTab === 'scheduled' ? scheduledColumns : activeColumns
-  const cancelledByCustomer = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && !o.cancellation_resolved && o.cancelled_by_role !== 'Operations Staff'), [sorted])
-  const cancelledByStaff = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && !o.cancellation_resolved && o.cancelled_by_role === 'Operations Staff'), [sorted])
+  const cancelledByCustomer = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && !o.cancellation_resolved && !cancellationStartedByStaff(o)), [sorted])
+  const cancelledByStaff = useMemo(() => sorted.filter((o) => !o.cancellation_resolved && cancellationStartedByStaff(o) && (stageOf(o) === 'cancelled' || cancellationRequested(o))), [sorted])
   const resolvedCancellations = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && o.cancellation_resolved), [sorted])
+  const cancellationRequests = useMemo(() => sorted.filter((o) => cancellationRequested(o) && !cancellationStartedByStaff(o)), [sorted])
 
-  const activeOrderCount = filteredByTab.active.filter((o) => stageOf(o) !== 'cancelled' && !isScheduledOrder(o, now)).length
-  const scheduledOrderCount = filteredByTab.scheduled.filter((o) => stageOf(o) !== 'cancelled' && isScheduledOrder(o, now)).length
-  const cancelledOrderCount = filteredByTab.cancelled.filter((o) => stageOf(o) === 'cancelled').length
+  const activeOrderCount = filteredByTab.active.filter((o) => stageOf(o) !== 'cancelled' && !cancellationRequested(o) && !isScheduledOrder(o, now)).length
+  const scheduledOrderCount = filteredByTab.scheduled.filter((o) => stageOf(o) !== 'cancelled' && !cancellationRequested(o) && isScheduledOrder(o, now)).length
+  const cancelledOrderCount = filteredByTab.cancelled.filter((o) => stageOf(o) === 'cancelled' || cancellationRequested(o)).length
   const today = now.toLocaleDateString('en-CA')
   const yesterdayDate = new Date(now)
   yesterdayDate.setDate(yesterdayDate.getDate() - 1)
@@ -276,7 +378,7 @@ export default function OrderPreparationPage() {
   }
 
   return (
-    <AppShell role="staff" title="Order Preparation" titleActions={
+    <AppShell role="staff" title="Order Preparation" onRefresh={load} titleActions={
       <div className="ops-order-view-toggle" role="tablist" aria-label="Order view">
         <button type="button" role="tab" aria-selected={activeTab === 'active'} className={activeTab === 'active' ? 'active' : ''} onClick={() => setActiveTab('active')}>
           Active Orders <b>{activeOrderCount}</b>
@@ -361,12 +463,13 @@ export default function OrderPreparationPage() {
       {activeTab === 'cancelled' &&
       <section className="ops-cancellations">
         <div className="ops-cancellations-heading">
-          <div><h2>Cancelled Orders</h2><p>Review, resolve, and keep a record of cancelled orders.</p></div>
+          <div><h2>Cancellations and Refunds</h2><p>Review payment-sensitive requests, then keep completed cancellation records.</p></div>
           <span>{cancelledOrderCount} total</span>
         </div>
         <div className="ops-cancel-groups">
-          <CancelGroup title="Cancelled by Customer" tone="red" orders={cancelledByCustomer} onView={setDrawerOrder} onResolve={runResolve} busyId={busyId} />
-          <CancelGroup title="Cancelled by Operations Staff" tone="red" orders={cancelledByStaff} onView={setDrawerOrder} onResolve={runResolve} busyId={busyId} />
+          <CancellationRequestGroup orders={cancellationRequests} onView={setDrawerOrder} onReview={setReviewTarget} busyId={busyId} />
+          <CancelGroup title="Cancelled by Customer" tone="red" orders={cancelledByCustomer} onView={setDrawerOrder} onResolve={runResolve} onRefund={(order, refund) => setRefundTarget({ order, refund })} busyId={busyId} />
+          <CancelGroup title="Cancelled by Operations Staff" tone="red" orders={cancelledByStaff} onView={setDrawerOrder} onReview={setReviewTarget} onResolve={runResolve} busyId={busyId} />
           <CancelGroup title="Resolved Cancelled Orders" tone="neutral" orders={resolvedCancellations} onView={setDrawerOrder} resolved />
         </div>
       </section>
@@ -393,6 +496,14 @@ export default function OrderPreparationPage() {
         <CancelModal order={cancelTarget} busy={busyId === cancelTarget.id} onClose={() => setCancelTarget(null)} onConfirm={(reason) => runCancel(cancelTarget, reason)} />
       )}
 
+      {reviewTarget && (
+        <CancellationReviewModal order={reviewTarget} busy={busyId === reviewTarget.id} onClose={() => setReviewTarget(null)} onSubmit={runReview} />
+      )}
+
+      {refundTarget && (
+        <RefundCompletionModal target={refundTarget} busy={busyId === refundTarget.refund.id} onClose={() => setRefundTarget(null)} onSubmit={runCompleteRefund} />
+      )}
+
       <div className="ops-toasts" role="status" aria-live="polite">
         {toasts.map((t) => <div className={`ops-toast ops-toast-${t.type}`} key={t.id}>{t.type === 'success' ? <Check size={15} /> : <AlertTriangle size={15} />} {t.message}</div>)}
       </div>
@@ -409,7 +520,7 @@ function OrderCard({ order, busy, onView, onMain, onCancel }) {
   const overdue = isOverdue(order)
   const main = mainActionFor(order)
   const method = paymentMethod(order)
-  const canCancel = stage !== 'completed' && stage !== 'cancelled'
+  const canCancel = stage !== 'completed' && stage !== 'cancelled' && !cancellationRequested(order)
   return (
     <article className={`ops-card${overdue ? ' is-overdue' : ''}`}>
       <div className="ops-card-top">
@@ -438,25 +549,85 @@ function OrderCard({ order, busy, onView, onMain, onCancel }) {
   )
 }
 
-function CancelGroup({ title, tone, orders, onView, onResolve, resolved, busyId }) {
+function CancelGroup({ title, tone, orders, onView, onReview, onResolve, onRefund, resolved, busyId }) {
   return (
     <section className={`ops-cancel-group tone-${tone}${resolved ? ' is-resolved' : ''}`}>
       <header><div><span>{title}</span><small>{resolved ? 'Closed records' : 'Needs review'}</small></div><b>{orders.length}</b></header>
-      <div className="ops-cancel-list">
-        {orders.length === 0 ? <EmptyColumn /> : orders.map((order) => (
-          <article className={`ops-cancel-card${resolved ? ' is-resolved' : ''}`} key={order.id}>
+      <div className="ops-cancel-list" role={orders.length > 4 ? 'region' : undefined} aria-label={orders.length > 4 ? `${title} orders` : undefined} tabIndex={orders.length > 4 ? 0 : undefined}>
+        {orders.length === 0 ? <EmptyColumn /> : orders.map((order) => {
+          const refund = actionableRefund(order)
+          const needsReview = cancellationRequested(order)
+          return <article className={`ops-cancel-card${resolved ? ' is-resolved' : ''}`} key={order.id}>
             <div><b>{order.order_number}</b><span>{order.customer_name}</span></div>
             <p>{order.cancellation_reason}</p>
             <div className="ops-cancel-card-meta">
-              <span>{order.cancelled_at ? timeAgo(order.cancelled_at) : ''}</span>
+              <span>{order.cancellation_requested_at || order.cancelled_at ? timeAgo(order.cancellation_requested_at || order.cancelled_at) : ''}</span>
               <span>{paymentStatusLabel(order)}</span>
             </div>
             <div className="ops-card-actions-row">
               <button type="button" className="ops-secondary-action" onClick={() => onView(order)}>View Details</button>
-              {!resolved && <button type="button" className="ops-main-action compact" disabled={busyId === order.id} onClick={() => onResolve(order)}>{busyId === order.id ? 'Please wait…' : 'Resolve'}</button>}
+              {!resolved && needsReview && onReview && <button type="button" className="ops-main-action compact" disabled={busyId === order.id} onClick={() => onReview(order)}>{busyId === order.id ? 'Please wait…' : 'Review Cancellation'}</button>}
+              {!resolved && !needsReview && order.refund_status === 'not_applicable' && <button type="button" className="ops-main-action compact" disabled={busyId === order.id} onClick={() => onResolve(order)}>{busyId === order.id ? 'Please wait…' : 'Resolve'}</button>}
+              {!resolved && !needsReview && refund && onRefund && <button type="button" className="ops-main-action compact" disabled={busyId === refund.id} onClick={() => onRefund(order, refund)}>{busyId === refund.id ? 'Please wait...' : 'Done Refund'}</button>}
+              {!resolved && !needsReview && order.refund_status !== 'not_applicable' && !(refund && onRefund) && <span className="ops-review-status">{refundStatusLabel(order.refund_status)}</span>}
             </div>
           </article>
-        ))}
+        })}
+      </div>
+    </section>
+  )
+}
+
+function RefundCompletionModal({ target, busy, onClose, onSubmit }) {
+  const { order, refund } = target
+  const [referenceNumber, setReferenceNumber] = useState(refund.reference_number || '')
+  const submit = (event) => {
+    event.preventDefault()
+    const reference = referenceNumber.trim()
+    if (!reference) return
+    onSubmit({ order, refund, referenceNumber: reference })
+  }
+  return (
+    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+      <section className="payment-modal ops-popup-modal" role="alertdialog" aria-modal="true" aria-labelledby="refund-completion-title">
+        <span className="payment-modal-kicker">Refund completion</span>
+        <h2 id="refund-completion-title">Confirm completed refund</h2>
+        <p>Only mark the {money(refund.refund_amount)} refund for {order.order_number} as done after the customer payout has actually been transferred.</p>
+        <form onSubmit={submit}>
+          <label className="field"><span>Transfer or refund reference</span><input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value)} placeholder="e.g. GCash or bank reference number" autoFocus required /></label>
+          <p className="ops-proof-pending">Saving the reference resolves the cancellation and emails the customer that the refund is complete.</p>
+          <div className="payment-modal-actions">
+            <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Go back</button>
+            <button className="primary-button" type="submit" disabled={busy || !referenceNumber.trim()}>{busy ? 'Saving...' : 'Done Refund'}</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+function CancellationRequestGroup({ orders, onView, onReview, busyId }) {
+  return (
+    <section className="ops-cancel-group tone-gold ops-review-group">
+      <header><div><span>Cancellation Requests</span><small>Payment check required</small></div><b>{orders.length}</b></header>
+      <div className="ops-cancel-list" role={orders.length > 4 ? 'region' : undefined} aria-label={orders.length > 4 ? 'Cancellation requests' : undefined} tabIndex={orders.length > 4 ? 0 : undefined}>
+        {orders.length === 0 ? <EmptyColumn /> : orders.map((order) => {
+          const state = cancellationPaymentState(order)
+          return (
+            <article className="ops-cancel-card ops-review-card" key={order.id}>
+              <div><b>{order.order_number}</b><span>{order.customer_name}</span></div>
+              <p>{order.cancellation_reason || 'No reason provided.'}</p>
+              <div className="ops-cancel-card-meta">
+                <span>{order.cancellation_requested_at ? timeAgo(order.cancellation_requested_at) : 'New request'}</span>
+                <span>{state === 'paid' ? 'Paid' : state === 'proof_pending' ? 'Proof needs review' : 'Unpaid'}</span>
+              </div>
+              <div className="ops-card-actions-row">
+                <button type="button" className="ops-secondary-action" onClick={() => onView(order)}>View Details</button>
+                <button type="button" className="ops-main-action compact" disabled={busyId === order.id} onClick={() => onReview(order)}>{busyId === order.id ? 'Please wait…' : 'Review Request'}</button>
+              </div>
+            </article>
+          )
+        })}
       </div>
     </section>
   )
@@ -479,22 +650,72 @@ function ConfirmModal({ title, message, busy, onCancel, onConfirm }) {
 }
 
 function CancelModal({ order, busy, onClose, onConfirm }) {
-  const [reason, setReason] = useState('')
+  const [reason, setReason, clearReason] = useManagementSessionState(`staff:orders:cancel-reason:${order.id}`, '')
+  const close = () => { clearReason(); onClose() }
   const trimmed = reason.trim()
+  const reviewRequired = cancellationPaymentState(order) !== 'unpaid'
+  const submit = async () => { if (await onConfirm(trimmed)) clearReason() }
   return (
-    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
+    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) close() }}>
       <section className="payment-modal ops-popup-modal" role="alertdialog" aria-modal="true" aria-labelledby="ops-cancel-title">
-        <span className="payment-modal-kicker">Cancel order</span>
-        <h2 id="ops-cancel-title">Cancel {order.order_number}?</h2>
-        <p>This cannot be undone. Please provide a reason for the customer's record.</p>
+        <span className="payment-modal-kicker">{reviewRequired ? 'Start cancellation review' : 'Cancel order'}</span>
+        <h2 id="ops-cancel-title">{reviewRequired ? `Review cancellation for ${order.order_number}?` : `Cancel ${order.order_number}?`}</h2>
+        <p>{reviewRequired
+          ? 'This order has a verified payment or submitted payment proof. Fulfillment will be placed on hold until payment and refund checks are complete.'
+          : 'No verified payment is recorded, so this order will be cancelled immediately.'}</p>
         <label className="field">
           <span>Cancellation reason</span>
           <textarea rows="3" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Item unavailable, customer request…" autoFocus />
         </label>
-        <p className="ops-proof-pending">A reason is required before you can cancel this order.</p>
+        <p className="ops-proof-pending">A reason is required. The customer will receive an email after this action is recorded.</p>
         <div className="payment-modal-actions">
-          <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Keep order</button>
-          <button className="danger-button" type="button" disabled={busy || !trimmed} onClick={() => onConfirm(trimmed)}>{busy ? 'Cancelling…' : 'Cancel order'}</button>
+          <button className="secondary-button" type="button" onClick={close} disabled={busy}>Keep order</button>
+          <button className="danger-button" type="button" disabled={busy || !trimmed} onClick={submit}>{busy ? 'Please wait…' : reviewRequired ? 'Place on hold' : 'Cancel order'}</button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function CancellationReviewModal({ order, busy, onClose, onSubmit }) {
+  const paymentState = cancellationPaymentState(order)
+  const draftScope = `staff:orders:${order.id}:cancellation-review`
+  const [notes, setNotes, clearNotes] = useManagementSessionState(`${draftScope}:notes`, '')
+  const [paymentOutcome, setPaymentOutcome, clearPaymentOutcome] = useManagementSessionState(`${draftScope}:payment-outcome`, paymentState === 'proof_pending' ? '' : null)
+  const canApprove = notes.trim() && (paymentState !== 'proof_pending' || paymentOutcome)
+  const becomesPaid = paymentState === 'paid' || paymentOutcome === 'received'
+  const clearDraft = () => { clearNotes(); clearPaymentOutcome() }
+  const close = () => { clearDraft(); onClose() }
+  const submit = async (approve) => { if (await onSubmit({ order, approve, notes: notes.trim(), paymentOutcome })) clearDraft() }
+  return (
+    <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) close() }}>
+      <section className="payment-modal ops-popup-modal ops-review-modal" role="alertdialog" aria-modal="true" aria-labelledby="ops-review-title">
+        <span className="payment-modal-kicker">Payment-safe cancellation</span>
+        <h2 id="ops-review-title">Review {order.order_number}</h2>
+        <div className="ops-review-summary">
+          <p><span>Customer</span><b>{order.customer_name}</b></p>
+          <p><span>Order total</span><b>{money(order.final_total)}</b></p>
+          <p><span>Payment state</span><b>{paymentState === 'paid' ? 'Verified as paid' : 'Proof awaiting verification'}</b></p>
+          <p><span>Request reason</span><b>{order.cancellation_reason || 'No reason provided'}</b></p>
+        </div>
+        {paymentState === 'proof_pending' && (
+          <fieldset className="ops-payment-outcome">
+            <legend>What did the payment check confirm?</legend>
+            <label><input type="radio" name="payment-outcome" value="received" checked={paymentOutcome === 'received'} onChange={(event) => setPaymentOutcome(event.target.value)} /> Payment was received</label>
+            <label><input type="radio" name="payment-outcome" value="not_received" checked={paymentOutcome === 'not_received'} onChange={(event) => setPaymentOutcome(event.target.value)} /> Payment was not received</label>
+          </fieldset>
+        )}
+        <label className="field">
+          <span>Review notes</span>
+          <textarea rows="3" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Record how the payment was checked and why this decision is appropriate." autoFocus />
+        </label>
+        <p className="ops-proof-pending">{becomesPaid
+          ? `Approval cancels the order and creates a ${money(order.final_total)} refund that stays pending until the transfer reference is recorded.`
+          : 'Approval cancels the unpaid order immediately. Rejection removes the hold and returns it to preparation.'}</p>
+        <div className="payment-modal-actions ops-review-actions">
+          <button className="secondary-button" type="button" onClick={close} disabled={busy}>Go back</button>
+          <button className="danger-button subtle" type="button" disabled={busy || !notes.trim()} onClick={() => submit(false)}>Reject request</button>
+          <button className="primary-button" type="button" disabled={busy || !canApprove} onClick={() => submit(true)}>{busy ? 'Saving…' : 'Approve cancellation'}</button>
         </div>
       </section>
     </div>
@@ -507,7 +728,7 @@ function OrderDrawer({ order, addonNames, onClose, onMain, onCancel, busy }) {
   const method = paymentMethod(order)
   const stage = stageOf(order)
   const main = mainActionFor(order)
-  const canCancel = stage !== 'completed' && stage !== 'cancelled'
+  const canCancel = stage !== 'completed' && stage !== 'cancelled' && !cancellationRequested(order)
 
   useEffect(() => {
     setProofUrl(''); setProofError('')
@@ -534,10 +755,16 @@ function OrderDrawer({ order, addonNames, onClose, onMain, onCancel, busy }) {
         </header>
 
         <div className="ops-drawer-body">
+          {cancellationRequested(order) && (
+            <div className="ops-drawer-cancellation-review">
+              <AlertTriangle size={16} />
+              <div><b>Cancellation review in progress</b><p>Fulfillment is on hold while payment and refund requirements are checked.</p><small>{order.cancellation_reason || 'No reason provided.'}</small></div>
+            </div>
+          )}
           {order.status === 'Cancelled' && (
             <div className="ops-drawer-cancelled">
               <AlertTriangle size={16} />
-              <div><b>Cancelled{order.cancelled_by_role ? ` by ${order.cancelled_by_role}` : ''}</b><p>{order.cancellation_reason || 'No reason provided.'}</p></div>
+              <div><b>Cancelled{order.cancelled_by_role ? ` by ${order.cancelled_by_role}` : ''}</b><p>{order.cancellation_reason || 'No reason provided.'}</p><small>{refundStatusLabel(order.refund_status)}</small></div>
             </div>
           )}
 

@@ -4,16 +4,15 @@ import ProtectedRoute from './components/ProtectedRoute'
 import CustomerLayout from './components/customer/CustomerLayout'
 import CustomerProtectedRoute from './routes/CustomerProtectedRoute'
 import AdminDashboard from './pages/AdminDashboard'
-import AdminInventoryPage from './pages/AdminInventoryPage'
 import CashierPage from './pages/CashierPage'
-import CancellationReportPage from './pages/CancellationReportPage'
 import CustomerLoginPage from './pages/CustomerLoginPage'
 import HomePage from './pages/HomePage'
+import HelpPage from './pages/customer/HelpPage'
 import InventoryStockPage from './pages/InventoryStockPage'
 import ManageMenuPage from './pages/ManageMenuPage'
+import CustomerMessagesPage from './pages/CustomerMessagesPage'
 import OrderPreparationPage from './pages/OrderPreparationPage'
 import PortalLoginPage from './pages/PortalLoginPage'
-import SalesReportPage from './pages/SalesReportPage'
 import StaffDashboard from './pages/StaffDashboard'
 import StaffSettingsPage from './pages/StaffSettingsPage'
 import TransactionsPage from './pages/TransactionsPage'
@@ -21,7 +20,6 @@ import {
   AboutPage,
   CheckoutPage,
   ContactPage,
-  HelpPage,
   MenuPage,
   MyOrdersPage,
   NotFoundPage,
@@ -65,26 +63,6 @@ export default function App() {
         />
 
         <Route
-          path="/admin"
-          element={<ProtectedRoute allowedRoles={['admin']}><AdminDashboard /></ProtectedRoute>}
-        />
-        <Route
-          path="/admin/inventory"
-          element={<ProtectedRoute allowedRoles={['admin']}><AdminInventoryPage /></ProtectedRoute>}
-        />
-        <Route
-          path="/admin/transactions"
-          element={<ProtectedRoute allowedRoles={['admin']}><TransactionsPage /></ProtectedRoute>}
-        />
-        <Route
-          path="/admin/reports"
-          element={<ProtectedRoute allowedRoles={['admin']}><SalesReportPage /></ProtectedRoute>}
-        />
-        <Route
-          path="/admin/cancellations"
-          element={<ProtectedRoute allowedRoles={['admin']}><CancellationReportPage /></ProtectedRoute>}
-        />
-        <Route
           path="/admin/*"
           element={<ProtectedRoute allowedRoles={['admin']}><AdminDashboard /></ProtectedRoute>}
         />
@@ -100,6 +78,10 @@ export default function App() {
         <Route
           path="/staff/menu"
           element={<ProtectedRoute allowedRoles={['staff', 'operational_staff']}><ManageMenuPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/staff/messages"
+          element={<ProtectedRoute allowedRoles={['staff', 'operational_staff']}><CustomerMessagesPage /></ProtectedRoute>}
         />
         <Route
           path="/staff/reports"

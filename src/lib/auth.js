@@ -16,6 +16,12 @@ export function normalizeRole(role) {
   return value
 }
 
+export function isCustomerRole(role) {
+  return normalizeRole(role) === 'customer'
+}
+
+const portalProfileSelect = 'id, role, full_name, username, email'
+
 export async function getCurrentPortalSession() {
   if (!isSupabaseConfigured) return { session: null, profile: null, error: new Error('Supabase is not configured.') }
 
@@ -25,10 +31,9 @@ export async function getCurrentPortalSession() {
   const userId = sessionData.session.user.id
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('id, role, full_name, username, email')
+    .select(portalProfileSelect)
     .eq('id', userId)
     .maybeSingle()
-
   return { session: sessionData.session, profile, error: profileError || null }
 }
 
@@ -60,13 +65,12 @@ async function verifyPortalRole(data, role) {
   const userId = data.user?.id
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('id, role, full_name, username, email')
+    .select(portalProfileSelect)
     .eq('id', userId)
     .maybeSingle()
 
   if (profileError) throw profileError
   if (!profile) throw new Error('Login succeeded, but no staff profile was found for this account.')
-
   const actualRole = normalizeRole(profile.role)
   const roleMatches = requestedRole === actualRole || (requestedRole === 'staff' && actualRole === 'operational_staff')
   if (!roleMatches) {
@@ -74,6 +78,7 @@ async function verifyPortalRole(data, role) {
     throw new Error(`This account is registered as ${profile.role || 'another role'}, not ${role}.`)
   }
 
+  await supabase.from('profiles').update({ last_active_at: new Date().toISOString() }).eq('id', userId)
   return { session: data.session, profile }
 }
 
