@@ -55,6 +55,10 @@ function formatShortDate(value) {
   return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric' }).format(new Date(value))
 }
 
+function formatDashboardDate() {
+  return new Intl.DateTimeFormat('en-PH', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
+}
+
 function timeAgo(value) {
   const elapsed = Date.now() - new Date(value).getTime()
   if (elapsed < 60000) return 'Just now'
@@ -136,70 +140,72 @@ function DashboardContent({ metrics }) {
     { label: 'Awaiting reply', value: metrics.awaitingMessages.length, detail: `${metrics.messagesToday} received today`, icon: Mail, tone: 'blue', to: '/staff/messages' },
   ]
 
-  return <div className="ad-dashboard dash-fade-in">
-    <section className="ad-section" aria-labelledby="attention-heading">
-      <SectionHeading
-        id="attention-heading"
-        title="Needs attention"
-        detail="Open an item to review the complete workflow."
-        action={<div className="ad-attention-heading-actions">
-          <div className={`ad-store-state is-${metrics.storeStatus}`}><i /><b>{metrics.storeStatus === 'closed' ? 'Online ordering is paused' : 'Store operations are live'}</b></div>
-          <Link to="/admin/settings">Review system settings <ArrowRight size={15} /></Link>
-        </div>}
-      />
-      <div className="ad-attention-grid">
-        {actionCards.map((item) => <Link className={`ad-attention-card is-${item.tone}`} to={item.to} key={item.label}>
-          <span className="ad-attention-icon"><item.icon size={18} /></span><span><b>{item.value}</b><strong>{item.label}</strong><small>{item.detail}</small></span><ArrowRight size={15} />
-        </Link>)}
+  const quickLinks = [
+    { label: 'Transactions', icon: ReceiptText, to: '/admin/transactions' },
+    { label: 'Sales report', icon: CircleDollarSign, to: '/admin/reports' },
+    { label: 'Inventory', icon: PackageCheck, to: '/admin/inventory' },
+  ]
+
+  return <div className="ad-dashboard ad-dashboard-v2 dash-fade-in">
+    <section className="ad-command-center" aria-labelledby="dashboard-overview-heading">
+      <div className="ad-command-copy">
+        <span className="ad-command-kicker"><i />{formatDashboardDate()}</span>
+        <h2 id="dashboard-overview-heading">Store operations at a glance</h2>
+        <p>Track sales, orders, inventory, and customer activity from one clear workspace.</p>
+      </div>
+      <div className="ad-command-side">
+        <div className={`ad-store-state is-${metrics.storeStatus}`}><i /><b>{metrics.storeStatus === 'closed' ? 'Online ordering paused' : 'Store operations live'}</b></div>
+        <nav className="ad-quick-nav" aria-label="Dashboard shortcuts">
+          {quickLinks.map(({ label, icon: Icon, to }) => <Link to={to} key={label}><Icon size={17} /><span>{label}</span></Link>)}
+        </nav>
       </div>
     </section>
 
-    <section className="ad-section" aria-labelledby="today-heading">
-      <SectionHeading id="today-heading" title="Today at a glance" detail="Paid, completed sales are used for revenue." action={<Link to="/admin/reports">Open sales report <ArrowRight size={15} /></Link>} />
+    <section className="ad-section ad-overview-section" aria-labelledby="today-heading">
+      <SectionHeading id="today-heading" title="Today's overview" detail="Revenue uses paid, completed sales." action={<Link to="/admin/reports">View full report <ArrowRight size={15} /></Link>} />
       <div className="ad-kpi-grid">
         <KpiCard icon={CircleDollarSign} label="Net sales" value={money(metrics.totalSales)} comparison={metrics.salesChangePct} detail="vs yesterday" tone="green" />
         <KpiCard icon={ShoppingBag} label="Orders" value={metrics.totalOrders.toLocaleString()} detail={`${metrics.completedOrders} completed`} tone="cream" />
         <KpiCard icon={WalletCards} label="Average order" value={money(metrics.avgOrderValue)} detail="Paid completed orders" tone="blue" />
         <KpiCard icon={CheckCircle2} label="Completion rate" value={`${metrics.completionRate.toFixed(0)}%`} detail={`${metrics.cancelledOrders} cancelled today`} tone="rose" />
+        <KpiCard icon={UsersRound} label="Customers" value={metrics.totalCustomers.toLocaleString()} detail={`${metrics.newCustomers + metrics.returningCustomers} active today`} tone="green" />
       </div>
     </section>
 
-    <section className="ad-grid ad-grid-8-4">
-      <Panel title="Live order flow" detail="Today’s orders by operational stage" action={<Link to="/staff">Open preparation <ArrowRight size={15} /></Link>} className="ad-operations-panel">
+    <section className="ad-v2-grid ad-v2-grid-main" aria-label="Sales and attention overview">
+      <Panel title="Sales momentum" detail="Net sales over the last 14 days" action={<Link to="/admin/trends">Explore trends <ArrowRight size={15} /></Link>} className="ad-v2-sales-panel">
+        <SalesLineChart points={metrics.salesTrend} />
+      </Panel>
+
+      <Panel title="Needs attention" detail="Priority work requiring a review" action={<span className="ad-attention-count">{actionCards.reduce((sum, item) => sum + item.value, 0)} open</span>} className="ad-v2-attention-panel">
+        <div className="ad-attention-grid">
+          {actionCards.map((item) => <Link className={`ad-attention-card is-${item.tone}`} to={item.to} key={item.label}>
+            <span className="ad-attention-icon"><item.icon size={18} /></span><span><b>{item.value}</b><strong>{item.label}</strong><small>{item.detail}</small></span><ArrowRight size={15} />
+          </Link>)}
+        </div>
+        <Link className="ad-settings-link" to="/admin/settings">Review system settings <ArrowRight size={15} /></Link>
+      </Panel>
+    </section>
+
+    <section className="ad-v2-grid ad-v2-grid-wide" aria-label="Orders and payments">
+      <Panel title="Live order flow" detail="Today's orders by operational stage" action={<Link to="/staff">Open preparation <ArrowRight size={15} /></Link>} className="ad-operations-panel">
         <OrderFlowChart counts={metrics.orderStageCounts} />
         <div className="ad-order-list">
           <div className="ad-list-head"><span>Recent orders</span><span>Status</span></div>
           {metrics.recentOrders.slice(0, 5).map((order) => <div className="ad-order-row" key={order.id}>
-            <span><b>{order.order_number}</b><small>{order.customer_name || 'Walk-in customer'} · {fulfillmentLabels[order.order_type] || order.order_type}</small></span>
+            <span><b>{order.order_number}</b><small>{order.customer_name || 'Walk-in customer'} - {fulfillmentLabels[order.order_type] || order.order_type}</small></span>
             <span className={`ad-order-status is-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{order.status}</span>
           </div>)}
+          {!metrics.recentOrders.length && <EmptyState icon={ReceiptText} text="No orders have been recorded today." />}
         </div>
       </Panel>
 
-      <Panel title="Customer activity" detail="Today’s customer mix and inbox workload" action={<Link to="/staff/messages">Open inbox <ArrowRight size={15} /></Link>}>
-        <CustomerMixChart newCustomers={metrics.newCustomers} returningCustomers={metrics.returningCustomers} />
-        <div className="ad-customer-stats">
-          <div><UsersRound size={17} /><span><b>{metrics.totalCustomers.toLocaleString()}</b><small>Registered customers</small></span></div>
-          <div><Mail size={17} /><span><b>{metrics.awaitingMessages.length}</b><small>Awaiting a reply</small></span></div>
-          <div><TrendingUp size={17} /><span><b>{(metrics.newCustomers + metrics.returningCustomers) ? `${Math.round((metrics.returningCustomers / (metrics.newCustomers + metrics.returningCustomers)) * 100)}%` : '0%'}</b><small>Returning rate</small></span></div>
-        </div>
-        <div className="ad-message-list">
-          {metrics.awaitingMessages.slice(0, 3).map((message) => <Link to="/staff/messages" key={message.id}><i /><span><b>{message.subject}</b><small>{message.customer_name} · {timeAgo(message.created_at)}</small></span></Link>)}
-          {!metrics.awaitingMessages.length && <EmptyState icon={CheckCircle2} text="No customer messages are waiting." />}
-        </div>
-      </Panel>
-    </section>
-
-    <section className="ad-grid ad-grid-7-5">
-      <Panel title="Sales momentum" detail="Net sales over the last 14 days" action={<Link to="/admin/trends">Explore trends <ArrowRight size={15} /></Link>}>
-        <SalesLineChart points={metrics.salesTrend} />
-      </Panel>
-      <Panel title="Most used payment methods" detail="Today’s completed payments ranked by usage">
+      <Panel title="Payment mix" detail="Today's completed payments by usage">
         <BreakdownDonut data={metrics.paymentUsage} labels={paymentLabels} colors={['#147d57', '#d1a44f', '#5f86a0', '#9a7564']} />
       </Panel>
     </section>
 
-    <section className="ad-grid ad-grid-7-5">
+    <section className="ad-v2-grid ad-v2-grid-wide" aria-label="Inventory and product performance">
       <Panel title="Inventory risk" detail="Low and out-of-stock items ranked by urgency" action={<Link to="/admin/inventory">Monitor inventory <ArrowRight size={15} /></Link>}>
         <div className="ad-inventory-summary">
           <div className="is-danger"><PackageX size={18} /><span><b>{metrics.outOfStockItems.length}</b><small>Out of stock</small></span></div>
@@ -209,7 +215,7 @@ function DashboardContent({ metrics }) {
         <div className="ad-stock-list">
           {metrics.lowStockItems.slice(0, 5).map((item) => {
             const ratio = item.min > 0 ? Math.min(100, Math.max(0, (item.quantity / item.min) * 100)) : 100
-            return <div className="ad-stock-row" key={item.id}><span><b>{item.name}</b><small>{item.quantity} {item.unit} on hand · alert at {item.min}</small></span><div><i style={{ width: `${ratio}%` }} /></div><strong>{item.healthy > item.quantity ? `+${Math.ceil(item.healthy - item.quantity)}` : 'Review'}</strong></div>
+            return <div className="ad-stock-row" key={item.id}><span><b>{item.name}</b><small>{item.quantity} {item.unit} on hand - alert at {item.min}</small></span><div><i style={{ width: `${ratio}%` }} /></div><strong>{item.healthy > item.quantity ? `+${Math.ceil(item.healthy - item.quantity)}` : 'Review'}</strong></div>
           })}
           {!metrics.lowStockItems.length && <EmptyState icon={PackageCheck} text="Inventory levels are healthy." />}
         </div>
@@ -220,13 +226,26 @@ function DashboardContent({ metrics }) {
       </Panel>
     </section>
 
-    <section className="ad-grid ad-grid-6-6">
-      <Panel title="Order channels" detail="Today’s non-cancelled orders">
-        <HorizontalBreakdown data={metrics.fulfillmentCounts} labels={fulfillmentLabels} />
+    <section className="ad-v2-grid ad-v2-grid-even" aria-label="Customer and administration activity">
+      <Panel title="Customer activity" detail="Today's customer mix and inbox workload" action={<Link to="/staff/messages">Open inbox <ArrowRight size={15} /></Link>}>
+        <CustomerMixChart newCustomers={metrics.newCustomers} returningCustomers={metrics.returningCustomers} />
+        <div className="ad-customer-stats">
+          <div><UsersRound size={17} /><span><b>{metrics.totalCustomers.toLocaleString()}</b><small>Registered customers</small></span></div>
+          <div><Mail size={17} /><span><b>{metrics.awaitingMessages.length}</b><small>Awaiting a reply</small></span></div>
+          <div><TrendingUp size={17} /><span><b>{(metrics.newCustomers + metrics.returningCustomers) ? `${Math.round((metrics.returningCustomers / (metrics.newCustomers + metrics.returningCustomers)) * 100)}%` : '0%'}</b><small>Returning rate</small></span></div>
+        </div>
+        <div className="ad-message-list">
+          {metrics.awaitingMessages.slice(0, 3).map((message) => <Link to="/staff/messages" key={message.id}><i /><span><b>{message.subject}</b><small>{message.customer_name} - {timeAgo(message.created_at)}</small></span></Link>)}
+          {!metrics.awaitingMessages.length && <EmptyState icon={CheckCircle2} text="No customer messages are waiting." />}
+        </div>
       </Panel>
-      <Panel title="Administration activity" detail="Recent recorded changes across the management portal" action={<Link to="/admin/users-access/activity">View audit trail <ArrowRight size={15} /></Link>}>
+
+      <Panel title="Store activity" detail="Order channels and recent administrative changes" action={<Link to="/admin/users-access/activity">View audit trail <ArrowRight size={15} /></Link>}>
+        <div className="ad-v2-subsection"><span>Order channels</span><small>Today's non-cancelled orders</small></div>
+        <HorizontalBreakdown data={metrics.fulfillmentCounts} labels={fulfillmentLabels} />
+        <div className="ad-v2-subsection ad-v2-subsection-divided"><span>Administration activity</span><small>Latest management changes</small></div>
         <div className="ad-activity-list">
-          {metrics.auditEvents.slice(0, 5).map((event) => <div key={event.id}><i className={`is-${event.severity || event.result}`} /><span><b>{event.summary}</b><small>{event.actor_name_snapshot || 'System'} · {timeAgo(event.occurred_at)}</small></span><em>{event.module?.replaceAll('_', ' ')}</em></div>)}
+          {metrics.auditEvents.slice(0, 4).map((event) => <div key={event.id}><i className={`is-${event.severity || event.result}`} /><span><b>{event.summary}</b><small>{event.actor_name_snapshot || 'System'} - {timeAgo(event.occurred_at)}</small></span><em>{event.module?.replaceAll('_', ' ')}</em></div>)}
           {!metrics.auditEvents.length && <EmptyState icon={UserRoundCheck} text="No recent administrative activity." />}
         </div>
       </Panel>
@@ -311,7 +330,7 @@ function BreakdownDonut({ data, labels, colors }) {
         const paymentPercentage = total ? (value.count / total) * 100 : 0
         return <button type="button" key={key} className={activeKey === key ? 'is-active' : ''} onMouseEnter={() => setActiveKey(key)} onFocus={() => setActiveKey(key)} aria-label={`${labels[key] || key}, ${value.count} payments, ${paymentPercentage.toFixed(0)} percent`}>
           <i style={{ background: colors[index % colors.length] }} />
-          <span><b>{labels[key] || key}</b><small>{value.count} payment{value.count === 1 ? '' : 's'} · {paymentPercentage.toFixed(0)}%</small><em><i style={{ width: `${paymentPercentage}%`, background: colors[index % colors.length] }} /></em></span>
+          <span><b>{labels[key] || key}</b><small>{value.count} payment{value.count === 1 ? '' : 's'} - {paymentPercentage.toFixed(0)}%</small><em><i style={{ width: `${paymentPercentage}%`, background: colors[index % colors.length] }} /></em></span>
           <strong>{money(value.revenue)}</strong>
         </button>
       })}
@@ -325,16 +344,16 @@ function CustomerMixChart({ newCustomers, returningCustomers }) {
   return <div className="ad-customer-mix">
     <div className="ad-mix-ring" style={{ '--mix': `${returningPct * 3.6}deg` }} role="img" aria-label={`${total} customers today: ${returningCustomers} returning and ${newCustomers} new`}><span><b>{total}</b><small>Customers today</small></span></div>
     <div className="ad-mix-breakdown">
-      <span><i className="is-returning" /><b>{returningCustomers}</b><small>Returning · {Math.round(returningPct)}%</small></span>
-      <span><i className="is-new" /><b>{newCustomers}</b><small>New · {Math.round(100 - returningPct)}%</small></span>
-      <p><TrendingUp size={13} /> {returningPct ? `${Math.round(returningPct)}% of today’s customers are returning` : 'No returning customers yet today'}</p>
+      <span><i className="is-returning" /><b>{returningCustomers}</b><small>Returning - {Math.round(returningPct)}%</small></span>
+      <span><i className="is-new" /><b>{newCustomers}</b><small>New - {Math.round(100 - returningPct)}%</small></span>
+      <p><TrendingUp size={13} /> {returningPct ? `${Math.round(returningPct)}% of today's customers are returning` : 'No returning customers yet today'}</p>
     </div>
   </div>
 }
 
 function RankedProducts({ products }) {
   const max = Math.max(1, ...products.map((item) => item.qty))
-  return <div className="ad-ranked-list">{products.length ? products.map((item, index) => <div key={item.name}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.qty} sold · {money(item.revenue)}</small><i><em style={{ width: `${(item.qty / max) * 100}%` }} /></i></div></div>) : <EmptyState icon={Coffee} text="No completed product sales yet." />}</div>
+  return <div className="ad-ranked-list">{products.length ? products.map((item, index) => <div key={item.name}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.qty} sold - {money(item.revenue)}</small><i><em style={{ width: `${(item.qty / max) * 100}%` }} /></i></div></div>) : <EmptyState icon={Coffee} text="No completed product sales yet." />}</div>
 }
 
 function HorizontalBreakdown({ data, labels }) {
