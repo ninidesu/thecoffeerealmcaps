@@ -5,16 +5,19 @@ import {
   Landmark,
   LogOut,
   Minus,
+  Moon,
   Pencil,
   Plus,
   ReceiptText,
   Search,
   ShoppingBag,
+  Sun,
   Wallet,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import LogoutConfirmModal from '../components/auth/LogoutConfirmModal'
+import { useTheme } from '../context/ThemeContext'
 import { menuItems, store } from '../data/mockData'
 import { getCurrentPortalSession, signOutPortal } from '../lib/auth'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
@@ -190,6 +193,8 @@ function validatePayment(payment, total) {
 
 export default function CashierPage() {
   const navigate = useNavigate()
+  const { resolvedTheme, setPreference } = useTheme()
+  const isDarkMode = resolvedTheme === 'dark'
   const fallbackProducts = useMemo(() => menuItems.map((item) => ({
     ...item,
     price: Number(item.price || 0),
@@ -215,6 +220,8 @@ export default function CashierPage() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [error, setError] = useState('')
   const [cashierProfile, setCashierProfile] = useState(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+  const [clock, setClock] = useState(() => new Date())
 
   useEffect(() => {
     let ignore = false
@@ -260,15 +267,12 @@ export default function CashierPage() {
   useEffect(() => {
     const syncFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement))
     document.addEventListener('fullscreenchange', syncFullscreen)
-    async function toggleFullscreen() {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen()
-      else await document.documentElement.requestFullscreen()
-    } catch {
-      setError('Fullscreen is not available in this browser.')
-    }
-  }
   return () => document.removeEventListener('fullscreenchange', syncFullscreen)
+  }, [])
+
+  useEffect(() => {
+    const clockTimer = window.setInterval(() => setClock(new Date()), 1000)
+    return () => window.clearInterval(clockTimer)
   }, [])
   const activeOrder = orderTabs.find((tab) => tab.id === activeOrderId) || orderTabs[0] || createOrderTab(1)
   const cart = activeOrder.cart
@@ -308,6 +312,13 @@ export default function CashierPage() {
   const change = payment.method === 'Cash' ? Math.max(0, Number(payment.cashReceived || 0) - total) : 0
   const cashierName = cashierProfile?.full_name || cashierProfile?.username || cashierProfile?.email || 'Cashier'
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0)
+  const cashierStatus = loading
+    ? { label: 'Syncing menu', tone: 'syncing' }
+    : notice
+      ? { label: 'Needs attention', tone: 'warning' }
+      : { label: 'Ready', tone: 'ready' }
+  const cashierDate = clock.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  const cashierTime = clock.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
 
   function openNewOrderTab() {
     setOrderTabs((current) => {
@@ -381,6 +392,7 @@ export default function CashierPage() {
     })
   }
   async function saveOrder() {
+    if (savingOrder) return false
     setError('')
     if (!cart.length) return setError('Add at least one item to the cart.')
     if (discount.enabled) {
@@ -390,91 +402,102 @@ export default function CashierPage() {
     const validationError = validatePayment(payment, total)
     if (validationError) return setError(validationError)
     if (!cashierProfile?.id) return setError('Cashier login is required before saving an order.')
-    const orderSequence = Math.floor(Date.now() / 1000)
-    const orderDraft = {
-      id: Date.now(),
-      orderNumber: `WI-${orderSequence}`,
-      customerName: customerName.trim() || 'Walk-in Customer',
-      subtotal,
-      discountAmount,
-      paymentMethod: payment.method,
-      paymentReference: payment.method !== 'Cash' ? payment.referenceNumber : '',
-      accountNumber: '',
-      bankName: payment.method === 'Bank Transfer' ? payment.bankName : '',
-      cashReceived: payment.method === 'Cash' ? Number(payment.cashReceived || total) : total,
-      change,
-      discountType: discount.enabled ? discount.type : '',
-      discountCustomerName: discount.enabled ? discount.customerName : '',
-      discountIdNumber: discount.enabled ? discount.idNumber : '',
-      discountSubtotal,
-      cashierName: cashierProfile?.full_name || cashierProfile?.username || cashierProfile?.email || 'Cashier',
-      total,
-      createdAt: new Date().toISOString(),
-      items: cart.map((item) => ({ ...item, unitPrice: lineUnitPrice(item), line_total: itemLineTotal(item) })),
-    }
+    setSavingOrder(true)
+    try {
+      const orderSequence = Math.floor(Date.now() / 1000)
+      const orderDraft = {
+        id: Date.now(),
+        orderNumber: `WI-${orderSequence}`,
+        customerName: customerName.trim() || 'Walk-in Customer',
+        subtotal,
+        discountAmount,
+        paymentMethod: payment.method,
+        paymentReference: payment.method !== 'Cash' ? payment.referenceNumber : '',
+        accountNumber: '',
+        bankName: payment.method === 'Bank Transfer' ? payment.bankName : '',
+        cashReceived: payment.method === 'Cash' ? Number(payment.cashReceived || total) : total,
+        change,
+        discountType: discount.enabled ? discount.type : '',
+        discountCustomerName: discount.enabled ? discount.customerName : '',
+        discountIdNumber: discount.enabled ? discount.idNumber : '',
+        discountSubtotal,
+        cashierName: cashierProfile?.full_name || cashierProfile?.username || cashierProfile?.email || 'Cashier',
+        total,
+        createdAt: new Date().toISOString(),
+        items: cart.map((item) => ({ ...item, unitPrice: lineUnitPrice(item), line_total: itemLineTotal(item) })),
+      }
 
-    if (!isSupabaseConfigured) {
-      setTransactions((current) => [orderDraft, ...current])
-      setReceipt(orderDraft)
+      if (!isSupabaseConfigured) {
+        setTransactions((current) => [orderDraft, ...current])
+        setReceipt(orderDraft)
+        setCart([])
+        setCustomerName('')
+        setDiscount(emptyDiscount())
+        setPayment(emptyPayment())
+        return true
+      }
+
+      const orderPayload = {
+        order_number: orderDraft.orderNumber,
+        order_sequence: orderSequence,
+        order_source: 'cashier_pos',
+        cashier_id: cashierProfile.id,
+        order_type: 'walk-in',
+        status: 'Ordered',
+        customer_name: orderDraft.customerName,
+        subtotal,
+        discount_type: discount.enabled ? discount.type : null,
+        discount_customer_name: discount.enabled ? discount.customerName : null,
+        discount_id_number: discount.enabled ? discount.idNumber : null,
+        discount_subtotal: discount.enabled ? discountSubtotal : 0,
+        discount_amount: discountAmount,
+        final_total: total,
+        payment_status: 'paid',
+        payment_confirmed: true,
+      }
+
+      const orderItems = cart.map((item) => ({
+        menu_item_id: item.id,
+        item_name: item.name,
+        unit_price: lineUnitPrice(item),
+        quantity: item.qty,
+        line_total: itemLineTotal(item),
+        is_discounted: Boolean(item.isDiscounted),
+        discount_amount: item.isDiscounted ? itemLineTotal(item) * 0.2 : 0,
+        customizations: item.customizations || {},
+        addons: item.addons || [],
+      }))
+      const paymentMethodCode = { Cash: 'cash', GCash: 'gcash', 'Bank Transfer': 'bank_transfer' }[payment.method] || 'cash'
+      const paymentPayload = {
+        method: paymentMethodCode,
+        amount_due: total,
+        amount_received: payment.method === 'Cash' ? Number(payment.cashReceived || total) : total,
+        change_amount: change,
+        reference_number: payment.method !== 'Cash' ? payment.referenceNumber : null,
+        account_number: null,
+        bank_name: payment.method === 'Bank Transfer' ? payment.bankName : null,
+        status: 'paid',
+        paid_at: new Date().toISOString(),
+      }
+      const { data: savedOrder, error: orderError } = await supabase.rpc('create_cashier_order', {
+        request_payload: { order: orderPayload, items: orderItems, payment: paymentPayload },
+      })
+      if (orderError || !savedOrder) {
+        setError(`Order was not saved: ${orderError?.message || 'The server returned no order.'}`)
+        return false
+      }
+
+      const saved = { ...orderDraft, id: savedOrder.id, orderNumber: savedOrder.order_number || orderDraft.orderNumber, subtotal: Number(savedOrder.subtotal ?? orderDraft.subtotal), discountAmount: Number(savedOrder.discount_amount ?? orderDraft.discountAmount), total: Number(savedOrder.total ?? orderDraft.total), change: Number(savedOrder.change_amount ?? orderDraft.change) }
+      setTransactions((current) => [saved, ...current])
+      setReceipt(saved)
       setCart([])
+      setCustomerName('')
+      setDiscount(emptyDiscount())
+      setPayment(emptyPayment())
       return true
+    } finally {
+      setSavingOrder(false)
     }
-
-    const orderPayload = {
-      order_number: orderDraft.orderNumber,
-      order_sequence: orderSequence,
-      order_source: 'cashier_pos',
-      cashier_id: cashierProfile.id,
-      order_type: 'walk-in',
-      status: 'Ordered',
-      customer_name: orderDraft.customerName,
-      subtotal,
-      discount_type: discount.enabled ? discount.type : null,
-      discount_customer_name: discount.enabled ? discount.customerName : null,
-      discount_id_number: discount.enabled ? discount.idNumber : null,
-      discount_subtotal: discount.enabled ? discountSubtotal : 0,
-      discount_amount: discountAmount,
-      final_total: total,
-      payment_status: 'paid',
-      payment_confirmed: true,
-    }
-
-    const orderItems = cart.map((item) => ({
-      menu_item_id: item.id,
-      item_name: item.name,
-      unit_price: lineUnitPrice(item),
-      quantity: item.qty,
-      line_total: itemLineTotal(item),
-      is_discounted: Boolean(item.isDiscounted),
-      discount_amount: item.isDiscounted ? itemLineTotal(item) * 0.2 : 0,
-      customizations: item.customizations || {},
-      addons: item.addons || [],
-    }))
-    const paymentMethodCode = { Cash: 'cash', GCash: 'gcash', 'Bank Transfer': 'bank_transfer' }[payment.method] || 'cash'
-    const paymentPayload = {
-      method: paymentMethodCode,
-      amount_due: total,
-      amount_received: payment.method === 'Cash' ? Number(payment.cashReceived || total) : total,
-      change_amount: change,
-      reference_number: payment.method !== 'Cash' ? payment.referenceNumber : null,
-      account_number: null,
-      bank_name: payment.method === 'Bank Transfer' ? payment.bankName : null,
-      status: 'paid',
-      paid_at: new Date().toISOString(),
-    }
-    const { data: savedOrder, error: orderError } = await supabase.rpc('create_cashier_order', {
-      request_payload: { order: orderPayload, items: orderItems, payment: paymentPayload },
-    })
-    if (orderError) return setError(`Order was not saved: ${orderError.message}`)
-
-    const saved = { ...orderDraft, id: savedOrder.id, orderNumber: savedOrder.order_number || orderDraft.orderNumber, subtotal: Number(savedOrder.subtotal), discountAmount: Number(savedOrder.discount_amount), total: Number(savedOrder.total), change: Number(savedOrder.change_amount) }
-    setTransactions((current) => [saved, ...current])
-    setReceipt(saved)
-    setCart([])
-    setCustomerName('')
-    setDiscount(emptyDiscount())
-    setPayment(emptyPayment())
-    return true
   }
   async function logout() {
     if (loggingOut) return
@@ -508,16 +531,33 @@ export default function CashierPage() {
     <div className={`cashier-v2 legacy-cashier ${isFullscreen ? 'cashier-is-fullscreen' : ''}`}>
       <header className="legacy-cashier-top">
         <div className="cashier-top-left">
-          <img src="/images/coffeerealmlogo.png" alt="thecoffeerealm logo" />
-          <div><span className="cashier-kicker">Walk-in point of sale</span><strong>the coffee realm</strong></div>
+          <span className="cashier-brand-mark" aria-hidden="true">TCR</span>
+          <div><span className="cashier-kicker">Walk-in point of sale</span><strong>The Coffee Realm</strong></div>
+          <span className={`cashier-connection-status is-${cashierStatus.tone}`} role="status" aria-live="polite" aria-label={cashierStatus.label}>
+            <i aria-hidden="true" />
+            <span className="cashier-status-label">{cashierStatus.label}</span>
+          </span>
         </div>
-        <div className="cashier-time">
-          <span>{new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
-          <b>{new Date().toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}</b>
+        <div className="cashier-top-meta">
+          <div className="cashier-time" aria-label={`Current time ${cashierTime}`}>
+            <span>{cashierDate}</span>
+            <b>{cashierTime}</b>
+          </div>
         </div>
         <nav>
-          <button type="button" onClick={() => setShowTransactions(true)}><ReceiptText size={21} /><span>transactions</span></button>
-          <button type="button" onClick={() => setLogoutOpen(true)}><LogOut size={21} /><span>logout</span></button>
+          <button type="button" onClick={() => setShowTransactions(true)}><ReceiptText size={21} /><span>Transactions</span></button>
+          <button
+            type="button"
+            className="cashier-theme-toggle"
+            onClick={() => setPreference(isDarkMode ? 'light' : 'dark')}
+            aria-pressed={isDarkMode}
+            aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {isDarkMode ? <Sun size={21} /> : <Moon size={21} />}
+            <span>{isDarkMode ? 'Light mode' : 'Dark mode'}</span>
+          </button>
+          <button type="button" onClick={() => setLogoutOpen(true)}><LogOut size={21} /><span>Sign out</span></button>
         </nav>
       </header>
 
@@ -538,12 +578,12 @@ export default function CashierPage() {
             
           </div>
           {notice ? <div className="cashier-sync-note">{notice}</div> : null}
-          <div className="cashier-menu-controls"><label><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search menu items" /></label><CategoryTabs categories={categories} active={category} onChange={setCategory} /></div>
+          <div className="cashier-menu-controls"><label><Search size={18} /><input inputMode="search" enterKeyHint="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search menu items" /></label><CategoryTabs categories={categories} active={category} onChange={setCategory} /></div>
           <ProductGrid products={filteredProducts} onAdd={addToCart} />
           {!loading && filteredProducts.length === 0 ? <div className="cashier-empty-state"><Search size={28} /><b>No menu items found</b><span>Try another category or search term.</span></div> : null}
         </section>
 
-        <aside className="legacy-ticket">
+        <aside className="legacy-ticket" id="cashier-current-order">
           <header>
             <div><span className="cashier-order-icon"><ShoppingBag size={18} /></span><span><small>Current order</small><b>{activeOrder.id}</b></span></div>
             <button type="button" className="cashier-clear-cart" onClick={() => setCart([])}>Clear Cart</button>
@@ -557,9 +597,13 @@ export default function CashierPage() {
           </div>
         </aside>
       </main>
+      <div className="cashier-mobile-summary" aria-live="polite">
+        <div><span>{cartCount} {cartCount === 1 ? 'item' : 'items'}</span><strong>{peso(total)}</strong></div>
+        <button type="button" onClick={() => document.getElementById('cashier-current-order')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} disabled={!cart.length}>View order</button>
+      </div>
       <LogoutConfirmModal open={logoutOpen} busy={loggingOut} onCancel={() => setLogoutOpen(false)} onConfirm={logout} />
 
-      {showCheckout ? <CheckoutModal cart={cart} subtotal={subtotal} total={total} discount={discount} setDiscount={setDiscount} payment={payment} setPayment={setPayment} change={change} error={error} onCancel={() => { setShowCheckout(false); setError('') }} onConfirm={async () => { if (await saveOrder()) setShowCheckout(false) }} /> : null}
+      {showCheckout ? <CheckoutModal cart={cart} subtotal={subtotal} total={total} discount={discount} setDiscount={setDiscount} payment={payment} setPayment={setPayment} change={change} error={error} saving={savingOrder} onCancel={() => { if (!savingOrder) { setShowCheckout(false); setError('') } }} onConfirm={async () => { if (await saveOrder()) setShowCheckout(false) }} /> : null}
       {customizingProduct ? <ItemCustomizationModal product={customizingProduct} onClose={() => setCustomizingProduct(null)} onAdd={(customizations, addons, quantity) => { updateConfiguredItem(customizingProduct, customizations, addons, quantity); setCustomizingProduct(null) }} /> : null}
       {showTransactions ? <CashierTransactionsModal transactions={transactions} onClose={() => setShowTransactions(false)} onViewDetails={openTransactionDetails} onOpenReceipt={(order) => { setReceipt(order); setShowTransactions(false) }} /> : null}
       {transactionDetails ? <TransactionDetailsModal order={transactionDetails} onBack={() => setTransactionDetails(null)} onClose={() => { setTransactionDetails(null); setShowTransactions(false) }} /> : null}
@@ -589,7 +633,7 @@ function ProductGrid({ products, onAdd }) {
 }
 
 function POSCart({ cart, onQty, onEdit }) {
-  return <div className="legacy-ticket-items">{cart.length === 0 ? <p>No items added yet.</p> : cart.map((item) => {
+  return <div className="legacy-ticket-items">{cart.length === 0 ? <div className="cashier-empty-cart"><ShoppingBag size={58} strokeWidth={1.15} /><p>No items added yet.</p></div> : cart.map((item) => {
     const editable = Boolean(item.allowSugar || item.allowIce || item.allowAddons || item.temperatureType || item.variantOptions?.length)
     return <article key={item.lineKey}>
       <img src={item.image} alt={item.name} />
@@ -639,6 +683,7 @@ function ItemCustomizationModal({ product, onClose, onAdd }) {
   const unitTotal = Number(selectedVariant?.price ?? product.price ?? 0) + addonTotal(addons)
   const modalTotal = unitTotal * quantity
   const variantTitle = product.variantConfig?.type === 'cake' ? 'Cake option' : 'Serving option'
+  const hasChoiceGroups = Boolean(variantOptions.length || temperatureOptions.length || (product.allowIce && isCold) || product.allowSugar)
 
   function chooseTemperature(option) {
     setTemperature(option)
@@ -665,52 +710,55 @@ function ItemCustomizationModal({ product, onClose, onAdd }) {
     }, addons, quantity)
   }
 
-  return <div className="cashier-custom-backdrop" role="dialog" aria-modal="true" aria-label={`Customize ${product.name}`}>
-    <section className="cashier-custom-modal modern-pos-modal">
-      <header className="cashier-custom-product-head modern-pos-modal-head">
+  return <div className="cashier-custom-backdrop customize-backdrop" role="dialog" aria-modal="true" aria-labelledby="customize-modal-title">
+    <section className="cashier-custom-modal customize-modal">
+      <header className="customize-modal-header">
         <img src={product.image} alt={product.name} />
-        <div className="modern-pos-product-copy">
-          <span>Customize item</span>
-          <h2>{product.name}</h2>
+        <div className="customize-product-info">
+          <span>Customize</span>
+          <h2 id="customize-modal-title">{product.name}</h2>
           <p>{product.category}</p>
-          <strong>{peso(unitTotal)}</strong>
         </div>
-        <button type="button" className="modern-pos-close" onClick={onClose} aria-label="Close customization">&times;</button>
+        <button type="button" className="customize-close" onClick={onClose} aria-label="Close customization">&times;</button>
       </header>
-      <div className="cashier-custom-body modern-pos-modal-body">
-        <div className="modern-pos-column">
+      <div className="customize-modal-body">
+        {hasChoiceGroups ? <div className="customize-choice-list" aria-label="Customization options">
           {variantOptions.length ? <VariantGroup title={variantTitle} options={variantOptions} value={selectedVariant} onChange={setSelectedVariant} /> : null}
           {temperatureOptions.length ? <OptionGroup title="Temperature" options={temperatureOptions} value={temperature} onChange={chooseTemperature} /> : null}
           {product.allowIce && isCold ? <OptionGroup title="Ice level" options={['Less Ice', 'Default Ice', 'More Ice']} value={iceLevel} onChange={setIceLevel} /> : null}
           {product.allowSugar ? <OptionGroup title="Sugar level" options={['0% Sugar', '25% Sugar', '50% Sugar', '75% Sugar', '100% Sugar']} value={sugarLevel} onChange={setSugarLevel} /> : null}
-        </div>
-        <div className="modern-pos-column">
-          {product.allowAddons ? <div className="cashier-option-group modern-addon-group"><h3>Add-ons</h3><div className="cashier-option-grid cashier-addon-grid modern-addon-list">{defaultAddonOptions.map((option) => {
+        </div> : <p className="customize-standard-note">This item uses its standard preparation.</p>}
+        {product.allowAddons ? <section className="customize-addons-section" aria-labelledby="customize-addons-title">
+          <div className="customize-section-head"><h3 id="customize-addons-title">Add-ons</h3><span>Optional</span></div>
+          <div className="customize-addons-grid">{defaultAddonOptions.map((option) => {
             const selected = addons.some((item) => item.name === option.name)
-            return <button type="button" className={selected ? 'active' : ''} key={option.name} onClick={() => toggleAddon(option)}>
+            return <button type="button" className={`customize-addon-button ${selected ? 'active' : ''}`} aria-pressed={selected} key={option.name} onClick={() => toggleAddon(option)}>
               <span>{selected ? <i>&#10003;</i> : null}{option.name}</span>
               <b>+{peso(option.price)}</b>
             </button>
-          })}</div></div> : null}
-        </div>
+          })}</div>
+        </section> : null}
       </div>
-      <footer className="modern-pos-summary-bar">
-        <div className="modern-quantity-stepper" aria-label="Quantity selector">
-          <button type="button" onClick={() => changeQuantity(-1)} aria-label="Decrease quantity"><Minus size={15} /></button>
-          <strong>{quantity}</strong>
-          <button type="button" onClick={() => changeQuantity(1)} aria-label="Increase quantity"><Plus size={15} /></button>
+      <footer className="customize-modal-footer">
+        <div className="customize-total"><span>Total</span><b>{peso(modalTotal)}</b></div>
+        <div className="customize-quantity">
+          <span>Quantity</span>
+          <div className="customize-stepper" aria-label="Quantity selector">
+            <button type="button" onClick={() => changeQuantity(-1)} aria-label="Decrease quantity"><Minus size={15} /></button>
+            <strong>{quantity}</strong>
+            <button type="button" onClick={() => changeQuantity(1)} aria-label="Increase quantity"><Plus size={15} /></button>
+          </div>
         </div>
-        <div className="modern-modal-total"><span>Total</span><b>{peso(modalTotal)}</b></div>
-        <button type="button" className="modern-add-cart" onClick={submitItem}>Add to Cart</button>
+        <button type="button" className="customize-add-button" onClick={submitItem}>Add to Cart</button>
       </footer>
     </section>
   </div>
 }
 function OptionGroup({ title, options, value, onChange }) {
-  return <div className="cashier-option-group modern-option-group"><h3>{title}</h3><div className="cashier-option-grid modern-pill-grid">{options.map((option) => <button type="button" className={value === option ? 'active' : ''} key={option} onClick={() => onChange(option)}>{option}</button>)}</div></div>
+  return <section className="customize-choice-section" aria-label={title}><div className="customize-section-head"><h3>{title}</h3><span>Select one</span></div><div className="customize-choice-grid">{options.map((option) => <button type="button" className={`customize-choice-button ${value === option ? 'active' : ''}`} aria-pressed={value === option} key={option} onClick={() => onChange(option)}><span className="customize-choice-label">{option}</span></button>)}</div></section>
 }
 function VariantGroup({ title, options, value, onChange }) {
-  return <div className="cashier-option-group modern-option-group"><h3>{title}</h3><div className="cashier-option-grid modern-pill-grid">{options.map((option) => <button type="button" className={value?.key === option.key ? 'active' : ''} key={option.key} onClick={() => onChange(option)}>{option.label}<small>{peso(option.price)}</small></button>)}</div></div>
+  return <section className="customize-choice-section" aria-label={title}><div className="customize-section-head"><h3>{title}</h3><span>Select one</span></div><div className="customize-choice-grid">{options.map((option) => <button type="button" className={`customize-choice-button ${value?.key === option.key ? 'active' : ''}`} aria-pressed={value?.key === option.key} key={option.key} onClick={() => onChange(option)}><span className="customize-choice-label">{option.label}</span><small>{peso(option.price)}</small></button>)}</div></section>
 }function DiscountPanel({ discount, setDiscount }) {
   return <section className="cashier-panel"><label className="cashier-check"><input type="checkbox" checked={discount.enabled} onChange={(event) => setDiscount((current) => ({ ...current, enabled: event.target.checked }))} /> Apply PWD / Senior Discount</label>{discount.enabled ? <div className="cashier-form-grid"><select value={discount.type} onChange={(event) => setDiscount((current) => ({ ...current, type: event.target.value }))}><option value="">Discount type</option><option value="PWD">PWD</option><option value="Senior">Senior</option></select><input value={discount.customerName} onChange={(event) => setDiscount((current) => ({ ...current, customerName: event.target.value }))} placeholder="Customer name" /><input value={discount.idNumber} onChange={(event) => setDiscount((current) => ({ ...current, idNumber: event.target.value }))} placeholder="PWD/Senior ID number" /></div> : null}</section>
 }
@@ -724,7 +772,7 @@ function OrderSummary({ subtotal, total }) {
 }
 
 
-function CheckoutModal({ cart, subtotal, total, discount, setDiscount, payment, setPayment, change, error, onCancel, onConfirm }) {
+function CheckoutModal({ cart, subtotal, total, discount, setDiscount, payment, setPayment, change, error, saving, onCancel, onConfirm }) {
   const discountChoices = ['No Discount', 'PWD', 'Senior']
   const paymentChoices = [
     { value: 'Cash', label: 'Cash', icon: Banknote },
@@ -741,14 +789,14 @@ function CheckoutModal({ cart, subtotal, total, discount, setDiscount, payment, 
     setDiscount((current) => ({ ...current, enabled: true, type: choice }))
   }
 
-  return <div className="checkout-backdrop" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+  return <div className="checkout-backdrop" role="dialog" aria-modal="true" aria-labelledby="checkout-title" aria-busy={saving}>
     <section className="checkout-modal">
       <header className="checkout-modal-head">
         <div className="checkout-modal-head-left">
           <span className="checkout-modal-icon"><ReceiptText size={20} /></span>
           <div><span className="cashier-kicker">Review order</span><h2 id="checkout-title">Checkout</h2></div>
         </div>
-        <button type="button" onClick={onCancel} aria-label="Close checkout">&times;</button>
+        <button type="button" onClick={onCancel} disabled={saving} aria-label="Close checkout">&times;</button>
       </header>
       <div className="checkout-modal-body">
         <section className="checkout-review-list" aria-label="Order items">
@@ -760,16 +808,16 @@ function CheckoutModal({ cart, subtotal, total, discount, setDiscount, payment, 
         </section>
         <section className="checkout-totals"><p><span>Subtotal</span><b>{peso(subtotal)}</b></p><p><strong>Total</strong><strong>{peso(total)}</strong></p></section>
         <section className="checkout-section"><h3>Discount</h3><div className="checkout-choice-grid">{discountChoices.map((choice) => <button type="button" key={choice} className={activeDiscount === choice ? 'active' : ''} onClick={() => chooseDiscount(choice)}>{choice}</button>)}</div>
-          {discount.enabled ? <div className="checkout-field-grid"><label>Name<input value={discount.customerName} onChange={(event) => setDiscount((current) => ({ ...current, customerName: event.target.value }))} placeholder="Customer name" /></label><label>ID number<input value={discount.idNumber} onChange={(event) => setDiscount((current) => ({ ...current, idNumber: event.target.value }))} placeholder="PWD or senior ID" /></label></div> : null}
+          {discount.enabled ? <div className="checkout-field-grid"><label>Name<input autoComplete="name" value={discount.customerName} onChange={(event) => setDiscount((current) => ({ ...current, customerName: event.target.value }))} placeholder="Customer name" /></label><label>ID number<input inputMode="text" autoComplete="off" value={discount.idNumber} onChange={(event) => setDiscount((current) => ({ ...current, idNumber: event.target.value }))} placeholder="PWD or senior ID" /></label></div> : null}
         </section>
         <section className="checkout-section"><h3>Payment</h3><div className="checkout-choice-grid checkout-payment-grid">{paymentChoices.map(({ value, label, icon: Icon }) => <button type="button" key={value} className={payment.method === value ? 'active' : ''} onClick={() => setPayment((current) => ({ ...current, method: value }))}><Icon size={17} />{label}</button>)}</div>
-          {payment.method === 'Cash' ? <div className="checkout-field-grid"><label>Amount paid<input type="number" min={total} step="0.01" value={payment.cashReceived} onChange={(event) => setPayment((current) => ({ ...current, cashReceived: event.target.value }))} placeholder={peso(total)} /></label><label>Change<input readOnly value={peso(change)} /></label></div> : null}
-          {payment.method === 'GCash' ? <div className="checkout-field-grid checkout-one-field"><label>Reference number<input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit reference number" /></label></div> : null}
-          {payment.method === 'Bank Transfer' ? <div className="checkout-field-grid"><label>Bank name<input value={payment.bankName} onChange={(event) => setPayment((current) => ({ ...current, bankName: event.target.value }))} placeholder="Bank name" /></label><label>Reference number<input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 30) }))} placeholder="Reference number" /></label></div> : null}
+          {payment.method === 'Cash' ? <div className="checkout-field-grid"><label>Amount paid<input inputMode="decimal" type="number" min={total} step="0.01" value={payment.cashReceived} onChange={(event) => setPayment((current) => ({ ...current, cashReceived: event.target.value }))} placeholder={peso(total)} /></label><label>Change<input readOnly value={peso(change)} /></label></div> : null}
+          {payment.method === 'GCash' ? <div className="checkout-field-grid checkout-one-field"><label>Reference number<input inputMode="numeric" autoComplete="off" value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit reference number" /></label></div> : null}
+          {payment.method === 'Bank Transfer' ? <div className="checkout-field-grid"><label>Bank name<input autoComplete="organization" value={payment.bankName} onChange={(event) => setPayment((current) => ({ ...current, bankName: event.target.value }))} placeholder="Bank name" /></label><label>Reference number<input inputMode="text" autoComplete="off" value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 30) }))} placeholder="Reference number" /></label></div> : null}
         </section>
       </div>
       {error ? <div className="checkout-error">{error}</div> : null}
-      <footer className="checkout-actions"><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={onConfirm}>Confirm order</button></footer>
+      <footer className="checkout-actions"><button type="button" onClick={onCancel} disabled={saving}>Cancel</button><button type="button" onClick={onConfirm} disabled={saving} aria-busy={saving}>{saving ? 'Saving order...' : 'Confirm order'}</button></footer>
     </section>
   </div>
 }

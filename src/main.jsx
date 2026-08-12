@@ -7,4 +7,5 @@ import { CartProvider } from './context/CartContext'
 import { ThemeProvider } from './context/ThemeContext'
 import './styles.css'
 import './management-theme.css'
+import './cashier-polish.css'
 createRoot(document.getElementById('root')).render(<StrictMode><BrowserRouter><ThemeProvider><AuthProvider><CartProvider><App/></CartProvider></AuthProvider></ThemeProvider></BrowserRouter></StrictMode>)
