@@ -46,6 +46,7 @@ const itemLineTotal = (item) => lineUnitPrice(item) * Number(item.qty || item.qu
 const emptyDiscount = () => ({ enabled: false, type: '', customerName: '', idNumber: '' })
 const emptyPayment = () => ({ method: 'Cash', cashReceived: '', referenceNumber: '', accountNumber: '09', bankName: '' })
 const MAX_OPEN_ORDER_TABS = 6
+const CASHIER_WORKSPACE_STORAGE_KEY = 'tcr-cashier-workspace-v1'
 const createOrderTab = (index = 1) => ({
   id: `WI-${String(index).padStart(3, '0')}`,
   cart: [],
@@ -53,6 +54,30 @@ const createOrderTab = (index = 1) => ({
   discount: emptyDiscount(),
   payment: emptyPayment(),
 })
+
+function loadSavedCashierWorkspace() {
+  const fallback = { orderTabs: [createOrderTab(1)], activeOrderId: 'WI-001' }
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(CASHIER_WORKSPACE_STORAGE_KEY) || 'null')
+    if (!Array.isArray(saved?.orderTabs) || !saved.orderTabs.length) return fallback
+
+    const orderTabs = saved.orderTabs.slice(0, MAX_OPEN_ORDER_TABS).map((tab, index) => ({
+      ...createOrderTab(index + 1),
+      ...tab,
+      id: typeof tab?.id === 'string' && tab.id ? tab.id : `WI-${String(index + 1).padStart(3, '0')}`,
+      cart: Array.isArray(tab?.cart) ? tab.cart : [],
+      customerName: typeof tab?.customerName === 'string' ? tab.customerName : '',
+      discount: { ...emptyDiscount(), ...(tab?.discount || {}) },
+      payment: { ...emptyPayment(), ...(tab?.payment || {}) },
+    }))
+    const activeOrderId = orderTabs.some((tab) => tab.id === saved.activeOrderId)
+      ? saved.activeOrderId
+      : orderTabs[0].id
+    return { orderTabs, activeOrderId }
+  } catch {
+    return fallback
+  }
+}
 
 const makeLineKey = (item, customizations = {}, addons = []) => [
   item.id,
@@ -202,7 +227,8 @@ export default function CashierPage() {
     itemType: item.itemType || item.category || '',
     ...productOptionDefaults({ ...item, itemType: item.itemType || item.category || '' }),
   })), [])
-  const [products, setProducts] = useState(fallbackProducts)
+  const [savedWorkspace] = useState(loadSavedCashierWorkspace)
+  const [products, setProducts] = useState(() => isSupabaseConfigured ? [] : fallbackProducts)
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(Boolean(isSupabaseConfigured))
   const [notice, setNotice] = useState('')
@@ -210,8 +236,8 @@ export default function CashierPage() {
   const [loggingOut, setLoggingOut] = useState(false)
   const [category, setCategory] = useState('All')
   const [search, setSearch] = useState('')
-  const [orderTabs, setOrderTabs] = useState(() => [createOrderTab(1)])
-  const [activeOrderId, setActiveOrderId] = useState('WI-001')
+  const [orderTabs, setOrderTabs] = useState(savedWorkspace.orderTabs)
+  const [activeOrderId, setActiveOrderId] = useState(savedWorkspace.activeOrderId)
   const [receipt, setReceipt] = useState(null)
   const [customizingProduct, setCustomizingProduct] = useState(null)
   const [showTransactions, setShowTransactions] = useState(false)
@@ -244,8 +270,8 @@ export default function CashierPage() {
         setProducts(liveProducts)
         setNotice(liveProducts.length ? '' : 'No active menu items are currently available in the POS.')
       } else {
-        setProducts(fallbackProducts)
-        setNotice(`Using local menu because Supabase menu_items could not load: ${productResult.error.message}`)
+        setProducts([])
+        setNotice(`The current menu could not load: ${productResult.error.message}`)
       }
       if (!orderResult.error && orderResult.data) setTransactions(orderResult.data.map(normalizeOrder))
       setLoading(false)
@@ -274,6 +300,18 @@ export default function CashierPage() {
     const clockTimer = window.setInterval(() => setClock(new Date()), 1000)
     return () => window.clearInterval(clockTimer)
   }, [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CASHIER_WORKSPACE_STORAGE_KEY, JSON.stringify({
+        orderTabs,
+        activeOrderId,
+        savedAt: new Date().toISOString(),
+      }))
+    } catch {
+      // The POS remains usable if storage is unavailable or full.
+    }
+  }, [activeOrderId, orderTabs])
   const activeOrder = orderTabs.find((tab) => tab.id === activeOrderId) || orderTabs[0] || createOrderTab(1)
   const cart = activeOrder.cart
   const customerName = activeOrder.customerName
@@ -579,7 +617,7 @@ export default function CashierPage() {
           </div>
           {notice ? <div className="cashier-sync-note">{notice}</div> : null}
           <div className="cashier-menu-controls"><label><Search size={18} /><input inputMode="search" enterKeyHint="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search menu items" /></label><CategoryTabs categories={categories} active={category} onChange={setCategory} /></div>
-          <ProductGrid products={filteredProducts} onAdd={addToCart} />
+          {loading ? <div className="cashier-empty-state cashier-menu-loading" role="status" aria-live="polite"><ShoppingBag size={28} /><b>Loading latest menu</b><span>Syncing current items, prices, and images.</span></div> : <ProductGrid products={filteredProducts} onAdd={addToCart} />}
           {!loading && filteredProducts.length === 0 ? <div className="cashier-empty-state"><Search size={28} /><b>No menu items found</b><span>Try another category or search term.</span></div> : null}
         </section>
 

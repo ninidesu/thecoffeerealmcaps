@@ -2614,7 +2614,7 @@ html[data-theme='dark'] .cashier-v2 [role='button'] {
 }
 
 html[data-theme='dark'] .cashier-v2 button {
-  font: inherit;
+  font-family: inherit;
   transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease, opacity 180ms ease, transform 120ms ease;
 }
 
@@ -5482,6 +5482,179 @@ html[data-theme] .cashier-v2 .customize-stepper strong {
   html[data-theme] .cashier-v2 .customize-add-button {
     grid-column: 1 / -1 !important;
     grid-row: 2 !important;
+  }
+}
+
+/* --- Theme toggle stability: identical metrics, theme-specific paint only --- */
+html[data-theme] .cashier-v2 .legacy-cashier-top {
+  border-width: 0 1px 1px !important;
+  border-style: solid !important;
+}
+
+html[data-theme='light'] .cashier-v2 .legacy-cashier-top {
+  border-color: transparent transparent rgba(32, 63, 48, 0.1) !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .legacy-cashier-top {
+  border-color: transparent #242927 #242927 !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-top-left > div {
+  border-right-width: 1px !important;
+  border-right-style: solid !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-top-left > div {
+  border-right-color: transparent !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-top-left > div {
+  border-right-color: #26302d !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-connection-status {
+  border-width: 1px !important;
+  border-style: solid !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-connection-status {
+  border-color: transparent !important;
+}
+
+html[data-theme] .cashier-v2 .legacy-cashier-top nav button {
+  height: 48px !important;
+  min-height: 48px !important;
+  font-size: 0.78rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+}
+
+html[data-theme] .cashier-v2 .legacy-cashier-top nav button:nth-child(1) {
+  width: 136px !important;
+  min-width: 136px !important;
+}
+
+html[data-theme] .cashier-v2 .legacy-cashier-top nav button:nth-child(2) {
+  width: 126px !important;
+  min-width: 126px !important;
+}
+
+html[data-theme] .cashier-v2 .legacy-cashier-top nav button:nth-child(3) {
+  width: 106px !important;
+  min-width: 106px !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-theme-toggle,
+html[data-theme] .cashier-v2 .cashier-theme-toggle:hover,
+html[data-theme] .cashier-v2 .cashier-theme-toggle:active,
+html[data-theme] .cashier-v2 .cashier-theme-toggle[aria-pressed='true'] {
+  transform: none !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-fullscreen,
+html[data-theme] .cashier-v2 .cashier-menu-actions .cashier-new-order,
+html[data-theme] .cashier-v2 .legacy-pos-tabs button,
+html[data-theme] .cashier-v2 .legacy-charge {
+  font-weight: 800 !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-fullscreen,
+html[data-theme] .cashier-v2 .cashier-menu-actions .cashier-new-order {
+  height: 44px !important;
+  min-height: 44px !important;
+  font-size: 0.74rem !important;
+  line-height: 1 !important;
+}
+
+html[data-theme] .cashier-v2 .legacy-pos-tabs button {
+  line-height: normal !important;
+}
+
+html[data-theme] .cashier-v2 .legacy-charge {
+  height: 58px !important;
+  min-height: 58px !important;
+  border-width: 1px !important;
+  border-style: solid !important;
+  font-size: 0.92rem !important;
+  line-height: 1 !important;
+}
+
+html[data-theme='light'] .cashier-v2 .legacy-charge {
+  border-color: transparent !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-product-body footer button {
+  border-width: 1px !important;
+  border-style: solid !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-product-body footer button {
+  border-color: transparent !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-cart-count {
+  border-width: 0 0 1px !important;
+  border-style: solid !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-cart-count {
+  border-bottom-color: transparent !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-checkout-block {
+  border-width: 1px 0 0 !important;
+  border-style: solid !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-checkout-block {
+  border-top-color: transparent !important;
+}
+
+html[data-theme] .cashier-v2 .legacy-ticket-total {
+  border: 0 !important;
+}
+
+html[data-theme] .cashier-v2 .customize-addons-section {
+  gap: 8px !important;
+}
+
+html[data-theme] .cashier-v2 .customize-choice-button,
+html[data-theme] .cashier-v2 .customize-addon-button {
+  font-size: 0.74rem !important;
+  font-weight: 700 !important;
+  line-height: 1.15 !important;
+}
+
+html[data-theme] .cashier-v2 .customize-choice-button {
+  gap: 3px !important;
+}
+
+html[data-theme] .cashier-v2 .customize-choice-button,
+html[data-theme] .cashier-v2 .customize-choice-button:hover,
+html[data-theme] .cashier-v2 .customize-choice-button:active,
+html[data-theme] .cashier-v2 .customize-addon-button,
+html[data-theme] .cashier-v2 .customize-addon-button:hover,
+html[data-theme] .cashier-v2 .customize-addon-button:active {
+  transform: none !important;
+}
+
+html[data-theme] .cashier-v2 .customize-addon-button > b {
+  font-size: 0.66rem !important;
+}
+
+html[data-theme] .cashier-v2 .customize-add-button {
+  font-weight: 750 !important;
+}
+
+@media (min-width: 1261px) {
+  html[data-theme] .cashier-v2 .legacy-cashier-top nav button {
+    height: 46px !important;
+    min-height: 46px !important;
+  }
+
+  html[data-theme] .cashier-v2 .legacy-charge {
+    height: 64px !important;
+    min-height: 64px !important;
   }
 }
 
