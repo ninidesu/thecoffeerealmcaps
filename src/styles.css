@@ -4402,9 +4402,13 @@
 .checkout-modal-head > button { width: 38px; height: 38px; border: 1px solid #e4e8e2; border-radius: 10px; background: #fff; color: #4e5a50; font-size: 1.3rem; flex-shrink: 0; }
 .checkout-modal-body { overflow: auto; padding: 4px 24px 22px; }
 .checkout-review-list { padding: 6px 0 4px; }
-.checkout-review-list article { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid #eceee9; }
-.checkout-review-list article:last-child { border-bottom: 0; }
-.checkout-review-list article div { display: grid; gap: 4px; }
+.checkout-review-list .checkout-review-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid #eceee9; }
+.checkout-review-list .checkout-review-item:last-child { border-bottom: 0; }
+.checkout-review-list .checkout-review-item > .checkout-item-details { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.checkout-review-list .checkout-item-meta { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.checkout-review-list .checkout-review-item.is-discount-mode { cursor: pointer; }
+.checkout-review-list .checkout-review-item.is-discounted { margin: 0 -10px; padding-left: 10px; padding-right: 10px; border-radius: 9px; background: #f1f8f1; }
+.checkout-item-checkbox { width: 20px; height: 20px; flex: 0 0 20px; margin: 1px 2px 0 0; accent-color: #214d36; cursor: pointer; }
 .checkout-review-list b { font-size: .95rem; font-weight: 800; }
 .checkout-review-list span { color: #7c877e; font-size: .78rem; line-height: 1.4; }
 .checkout-review-list .checkout-quantity { color: #7c877e; font-size: .78rem; white-space: nowrap; align-self: center; }
@@ -4433,10 +4437,8 @@
 
 
 /* Keep quantity visually paired with its line price in checkout review */
-.checkout-review-list article { grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
 .checkout-review-list .checkout-quantity { min-width: auto; text-align: right; padding-top: 1px; }
 .checkout-review-list strong { min-width: 98px; }
-@media (max-width: 560px) { .checkout-review-list .checkout-quantity { grid-row: 1; grid-column: 2; text-align: right; } .checkout-review-list strong { grid-row: 1; grid-column: 3; } }
 
 /* Compact cart edit action */
 .cashier-v2 .cashier-edit-line { min-height: 30px; padding: 0 9px; border: 1px solid #2563eb; border-radius: 7px; background: #fff; color: #2563eb; font-size: .7rem; font-weight: 800; }

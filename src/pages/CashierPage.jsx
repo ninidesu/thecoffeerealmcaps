@@ -15,6 +15,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import LogoutConfirmModal from '../components/auth/LogoutConfirmModal'
 import { useTheme } from '../context/ThemeContext'
@@ -41,9 +42,12 @@ const defaultAddonOptions = [
 const addonLabel = (addon) => `${addon.name} +${peso(addon.price)}`
 const addonTotal = (addons = []) => addons.reduce((sum, addon) => sum + Number(addon.price || 0), 0)
 const baseUnitPrice = (item) => Number(item.customizations?.variantPrice ?? item.price ?? 0)
+const roundMoney = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
+const itemBaseTotal = (item) => baseUnitPrice(item) * Number(item.qty || item.quantity || 0)
+const itemDiscountAmount = (item) => roundMoney(itemBaseTotal(item) * 0.2)
 const lineUnitPrice = (item) => baseUnitPrice(item) + addonTotal(item.addons)
 const itemLineTotal = (item) => lineUnitPrice(item) * Number(item.qty || item.quantity || 0)
-const emptyDiscount = () => ({ enabled: false, type: '', customerName: '', idNumber: '' })
+const emptyDiscount = () => ({ enabled: false, type: '', customerName: '', idNumber: '', discountedLineKeys: [] })
 const emptyPayment = () => ({ method: 'Cash', cashReceived: '', referenceNumber: '', accountNumber: '09', bankName: '' })
 const MAX_OPEN_ORDER_TABS = 6
 const CASHIER_WORKSPACE_STORAGE_KEY = 'tcr-cashier-workspace-v1'
@@ -344,8 +348,11 @@ export default function CashierPage() {
     return matchesCategory && haystack.includes(search.trim().toLowerCase())
   }), [category, products, search])
   const subtotal = cart.reduce((sum, item) => sum + itemLineTotal(item), 0)
-  const discountSubtotal = discount.enabled ? subtotal : 0
-  const discountAmount = discount.enabled ? discountSubtotal * 0.2 : 0
+  const discountedLineKeys = Array.isArray(discount.discountedLineKeys) ? discount.discountedLineKeys : []
+  const discountSubtotal = discount.enabled
+    ? cart.filter((item) => discountedLineKeys.includes(item.lineKey)).reduce((sum, item) => sum + itemBaseTotal(item), 0)
+    : 0
+  const discountAmount = discount.enabled ? roundMoney(discountSubtotal * 0.2) : 0
   const total = Math.max(0, subtotal - discountAmount)
   const change = payment.method === 'Cash' ? Math.max(0, Number(payment.cashReceived || 0) - total) : 0
   const cashierName = cashierProfile?.full_name || cashierProfile?.username || cashierProfile?.email || 'Cashier'
@@ -436,6 +443,7 @@ export default function CashierPage() {
     if (discount.enabled) {
       if (!['PWD', 'Senior'].includes(discount.type)) return setError('Select PWD or Senior discount type.')
       if (!discount.customerName.trim() || !discount.idNumber.trim()) return setError('Discount customer name and ID number are required.')
+      if (!cart.some((item) => discountedLineKeys.includes(item.lineKey))) return setError('Select at least one item for the discount.')
     }
     const validationError = validatePayment(payment, total)
     if (validationError) return setError(validationError)
@@ -462,7 +470,10 @@ export default function CashierPage() {
         cashierName: cashierProfile?.full_name || cashierProfile?.username || cashierProfile?.email || 'Cashier',
         total,
         createdAt: new Date().toISOString(),
-        items: cart.map((item) => ({ ...item, unitPrice: lineUnitPrice(item), line_total: itemLineTotal(item) })),
+        items: cart.map((item) => {
+          const isDiscounted = discount.enabled && discountedLineKeys.includes(item.lineKey)
+          return { ...item, isDiscounted, discount_amount: isDiscounted ? itemDiscountAmount(item) : 0, unitPrice: lineUnitPrice(item), line_total: itemLineTotal(item) }
+        }),
       }
 
       if (!isSupabaseConfigured) {
@@ -481,7 +492,7 @@ export default function CashierPage() {
         order_source: 'cashier_pos',
         cashier_id: cashierProfile.id,
         order_type: 'walk-in',
-        status: 'Ordered',
+        status: 'Preparing',
         customer_name: orderDraft.customerName,
         subtotal,
         discount_type: discount.enabled ? discount.type : null,
@@ -494,17 +505,20 @@ export default function CashierPage() {
         payment_confirmed: true,
       }
 
-      const orderItems = cart.map((item) => ({
-        menu_item_id: item.id,
-        item_name: item.name,
-        unit_price: lineUnitPrice(item),
-        quantity: item.qty,
-        line_total: itemLineTotal(item),
-        is_discounted: Boolean(item.isDiscounted),
-        discount_amount: item.isDiscounted ? itemLineTotal(item) * 0.2 : 0,
-        customizations: item.customizations || {},
-        addons: item.addons || [],
-      }))
+      const orderItems = cart.map((item) => {
+        const isDiscounted = discount.enabled && discountedLineKeys.includes(item.lineKey)
+        return {
+          menu_item_id: item.id,
+          item_name: item.name,
+          unit_price: lineUnitPrice(item),
+          quantity: item.qty,
+          line_total: itemLineTotal(item),
+          is_discounted: isDiscounted,
+          discount_amount: isDiscounted ? itemDiscountAmount(item) : 0,
+          customizations: item.customizations || {},
+          addons: item.addons || [],
+        }
+      })
       const paymentMethodCode = { Cash: 'cash', GCash: 'gcash', 'Bank Transfer': 'bank_transfer' }[payment.method] || 'cash'
       const paymentPayload = {
         method: paymentMethodCode,
@@ -641,7 +655,7 @@ export default function CashierPage() {
       </div>
       <LogoutConfirmModal open={logoutOpen} busy={loggingOut} onCancel={() => setLogoutOpen(false)} onConfirm={logout} />
 
-      {showCheckout ? <CheckoutModal cart={cart} subtotal={subtotal} total={total} discount={discount} setDiscount={setDiscount} payment={payment} setPayment={setPayment} change={change} error={error} saving={savingOrder} onCancel={() => { if (!savingOrder) { setShowCheckout(false); setError('') } }} onConfirm={async () => { if (await saveOrder()) setShowCheckout(false) }} /> : null}
+      {showCheckout ? <CheckoutModal cart={cart} subtotal={subtotal} total={total} discount={discount} discountAmount={discountAmount} setDiscount={setDiscount} payment={payment} setPayment={setPayment} change={change} error={error} saving={savingOrder} onCancel={() => { if (!savingOrder) { setShowCheckout(false); setError('') } }} onConfirm={async () => { if (await saveOrder()) setShowCheckout(false) }} /> : null}
       {customizingProduct ? <ItemCustomizationModal product={customizingProduct} onClose={() => setCustomizingProduct(null)} onAdd={(customizations, addons, quantity) => { updateConfiguredItem(customizingProduct, customizations, addons, quantity); setCustomizingProduct(null) }} /> : null}
       {showTransactions ? <CashierTransactionsModal transactions={transactions} onClose={() => setShowTransactions(false)} onViewDetails={openTransactionDetails} onOpenReceipt={(order) => { setReceipt(order); setShowTransactions(false) }} /> : null}
       {transactionDetails ? <TransactionDetailsModal order={transactionDetails} onBack={() => setTransactionDetails(null)} onClose={() => { setTransactionDetails(null); setShowTransactions(false) }} /> : null}
@@ -748,8 +762,9 @@ function ItemCustomizationModal({ product, onClose, onAdd }) {
     }, addons, quantity)
   }
 
-  return <div className="cashier-custom-backdrop customize-backdrop" role="dialog" aria-modal="true" aria-labelledby="customize-modal-title">
-    <section className="cashier-custom-modal customize-modal">
+  return createPortal(<div className="cashier-v2 cashier-modal-portal">
+    <div className="cashier-custom-backdrop customize-backdrop" role="dialog" aria-modal="true" aria-labelledby="customize-modal-title">
+      <section className="cashier-custom-modal customize-modal">
       <header className="customize-modal-header">
         <img src={product.image} alt={product.name} />
         <div className="customize-product-info">
@@ -763,8 +778,8 @@ function ItemCustomizationModal({ product, onClose, onAdd }) {
         {hasChoiceGroups ? <div className="customize-choice-list" aria-label="Customization options">
           {variantOptions.length ? <VariantGroup title={variantTitle} options={variantOptions} value={selectedVariant} onChange={setSelectedVariant} /> : null}
           {temperatureOptions.length ? <OptionGroup title="Temperature" options={temperatureOptions} value={temperature} onChange={chooseTemperature} /> : null}
-          {product.allowIce && isCold ? <OptionGroup title="Ice level" options={['Less Ice', 'Default Ice', 'More Ice']} value={iceLevel} onChange={setIceLevel} /> : null}
           {product.allowSugar ? <OptionGroup title="Sugar level" options={['0% Sugar', '25% Sugar', '50% Sugar', '75% Sugar', '100% Sugar']} value={sugarLevel} onChange={setSugarLevel} /> : null}
+          {product.allowIce && isCold ? <OptionGroup title="Ice level" options={['Less Ice', 'Default Ice', 'More Ice']} value={iceLevel} onChange={setIceLevel} /> : null}
         </div> : <p className="customize-standard-note">This item uses its standard preparation.</p>}
         {product.allowAddons ? <section className="customize-addons-section" aria-labelledby="customize-addons-title">
           <div className="customize-section-head"><h3 id="customize-addons-title">Add-ons</h3><span>Optional</span></div>
@@ -789,14 +804,16 @@ function ItemCustomizationModal({ product, onClose, onAdd }) {
         </div>
         <button type="button" className="customize-add-button" onClick={submitItem}>Add to Cart</button>
       </footer>
-    </section>
-  </div>
+      </section>
+    </div>
+  </div>, document.body)
 }
 function OptionGroup({ title, options, value, onChange }) {
-  return <section className="customize-choice-section" aria-label={title}><div className="customize-section-head"><h3>{title}</h3><span>Select one</span></div><div className="customize-choice-grid">{options.map((option) => <button type="button" className={`customize-choice-button ${value === option ? 'active' : ''}`} aria-pressed={value === option} key={option} onClick={() => onChange(option)}><span className="customize-choice-label">{option}</span></button>)}</div></section>
+  const layoutClass = title === 'Temperature' ? ' customize-temperature-section' : title === 'Ice level' ? ' customize-ice-section' : ''
+  return <section className={`customize-choice-section${layoutClass}`} aria-label={title}><div className="customize-section-head"><h3>{title}</h3><span>Select one</span></div><div className="customize-choice-grid">{options.map((option) => <button type="button" className={`customize-choice-button ${value === option ? 'active' : ''}`} aria-pressed={value === option} key={option} onClick={() => onChange(option)}><span className="customize-choice-label">{option}</span></button>)}</div></section>
 }
 function VariantGroup({ title, options, value, onChange }) {
-  return <section className="customize-choice-section" aria-label={title}><div className="customize-section-head"><h3>{title}</h3><span>Select one</span></div><div className="customize-choice-grid">{options.map((option) => <button type="button" className={`customize-choice-button ${value?.key === option.key ? 'active' : ''}`} aria-pressed={value?.key === option.key} key={option.key} onClick={() => onChange(option)}><span className="customize-choice-label">{option.label}</span><small>{peso(option.price)}</small></button>)}</div></section>
+  return <section className="customize-choice-section customize-variant-section" aria-label={title}><div className="customize-section-head"><h3>{title}</h3><span>Select one</span></div><div className="customize-choice-grid">{options.map((option) => <button type="button" className={`customize-choice-button ${value?.key === option.key ? 'active' : ''}`} aria-pressed={value?.key === option.key} key={option.key} onClick={() => onChange(option)}><span className="customize-choice-label">{option.label}</span><small>{peso(option.price)}</small></button>)}</div></section>
 }function DiscountPanel({ discount, setDiscount }) {
   return <section className="cashier-panel"><label className="cashier-check"><input type="checkbox" checked={discount.enabled} onChange={(event) => setDiscount((current) => ({ ...current, enabled: event.target.checked }))} /> Apply PWD / Senior Discount</label>{discount.enabled ? <div className="cashier-form-grid"><select value={discount.type} onChange={(event) => setDiscount((current) => ({ ...current, type: event.target.value }))}><option value="">Discount type</option><option value="PWD">PWD</option><option value="Senior">Senior</option></select><input value={discount.customerName} onChange={(event) => setDiscount((current) => ({ ...current, customerName: event.target.value }))} placeholder="Customer name" /><input value={discount.idNumber} onChange={(event) => setDiscount((current) => ({ ...current, idNumber: event.target.value }))} placeholder="PWD/Senior ID number" /></div> : null}</section>
 }
@@ -810,7 +827,7 @@ function OrderSummary({ subtotal, total }) {
 }
 
 
-function CheckoutModal({ cart, subtotal, total, discount, setDiscount, payment, setPayment, change, error, saving, onCancel, onConfirm }) {
+function CheckoutModal({ cart, subtotal, total, discount, discountAmount, setDiscount, payment, setPayment, change, error, saving, onCancel, onConfirm }) {
   const discountChoices = ['No Discount', 'PWD', 'Senior']
   const paymentChoices = [
     { value: 'Cash', label: 'Cash', icon: Banknote },
@@ -818,13 +835,26 @@ function CheckoutModal({ cart, subtotal, total, discount, setDiscount, payment, 
     { value: 'Bank Transfer', label: 'Bank', icon: Landmark },
   ]
   const activeDiscount = discount.enabled ? discount.type : 'No Discount'
+  const selectedLineKeys = Array.isArray(discount.discountedLineKeys) ? discount.discountedLineKeys : []
 
   function chooseDiscount(choice) {
     if (choice === 'No Discount') {
       setDiscount(emptyDiscount())
       return
     }
-    setDiscount((current) => ({ ...current, enabled: true, type: choice }))
+    setDiscount((current) => ({ ...current, enabled: true, type: choice, discountedLineKeys: Array.isArray(current.discountedLineKeys) ? current.discountedLineKeys : [] }))
+  }
+
+  function toggleDiscountItem(lineKey) {
+    setDiscount((current) => {
+      const currentKeys = Array.isArray(current.discountedLineKeys) ? current.discountedLineKeys : []
+      return {
+        ...current,
+        discountedLineKeys: currentKeys.includes(lineKey)
+          ? currentKeys.filter((key) => key !== lineKey)
+          : [...currentKeys, lineKey],
+      }
+    })
   }
 
   return <div className="checkout-backdrop" role="dialog" aria-modal="true" aria-labelledby="checkout-title" aria-busy={saving}>
@@ -838,13 +868,16 @@ function CheckoutModal({ cart, subtotal, total, discount, setDiscount, payment, 
       </header>
       <div className="checkout-modal-body">
         <section className="checkout-review-list" aria-label="Order items">
-          {cart.map((item) => <article key={item.lineKey}>
-            <div><b>{item.name}</b><span>{customizationDetails(item).join(' / ') || 'Standard preparation'}</span></div>
-            <span className="checkout-quantity">&times;{item.qty}</span>
-            <strong>{peso(itemLineTotal(item))}</strong>
-          </article>)}
+          {cart.map((item) => {
+            const selected = selectedLineKeys.includes(item.lineKey)
+            return <label className={'checkout-review-item' + (discount.enabled ? ' is-discount-mode' : '') + (selected ? ' is-discounted' : '')} key={item.lineKey}>
+              {discount.enabled ? <input className="checkout-item-checkbox" type="checkbox" checked={selected} onChange={() => toggleDiscountItem(item.lineKey)} disabled={saving} aria-label={'Apply ' + discount.type + ' discount to ' + item.name} /> : null}
+              <div className="checkout-item-details"><b>{item.name}</b><span>{customizationDetails(item).join(' / ') || 'Standard preparation'}</span></div>
+              <div className="checkout-item-meta"><span className="checkout-quantity">&times;{item.qty}</span><strong>{peso(itemLineTotal(item))}</strong></div>
+            </label>
+          })}
         </section>
-        <section className="checkout-totals"><p><span>Subtotal</span><b>{peso(subtotal)}</b></p><p><strong>Total</strong><strong>{peso(total)}</strong></p></section>
+        <section className="checkout-totals"><p><span>Subtotal</span><b>{peso(subtotal)}</b></p>{discount.enabled ? <p><span>{discount.type || 'Discount'} on selected items</span><b>-{peso(discountAmount)}</b></p> : null}<p><strong>Total</strong><strong>{peso(total)}</strong></p></section>
         <section className="checkout-section"><h3>Discount</h3><div className="checkout-choice-grid">{discountChoices.map((choice) => <button type="button" key={choice} className={activeDiscount === choice ? 'active' : ''} onClick={() => chooseDiscount(choice)}>{choice}</button>)}</div>
           {discount.enabled ? <div className="checkout-field-grid"><label>Name<input autoComplete="name" value={discount.customerName} onChange={(event) => setDiscount((current) => ({ ...current, customerName: event.target.value }))} placeholder="Customer name" /></label><label>ID number<input inputMode="text" autoComplete="off" value={discount.idNumber} onChange={(event) => setDiscount((current) => ({ ...current, idNumber: event.target.value }))} placeholder="PWD or senior ID" /></label></div> : null}
         </section>

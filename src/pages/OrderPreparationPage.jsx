@@ -19,7 +19,7 @@ const PENDING_STATUSES = ['Order Received', 'Awaiting Payment Verification', 'Pe
 const COLUMNS = [
   { key: 'pending', title: 'Pending Confirmation', subtitle: 'Verify payment proofs', icon: Clock, tone: 'amber' },
   { key: 'preparing', title: 'Preparing', subtitle: 'Orders being prepared', icon: Coffee, tone: 'blue' },
-  { key: 'ready', title: 'Ready for Pickup', subtitle: 'Orders ready for customer pickup', icon: Package, tone: 'green' },
+  { key: 'ready', title: 'Ready for Pickup / Dine-in / Take-out', subtitle: 'Orders ready for handoff or in-store service', icon: Package, tone: 'green' },
   { key: 'delivery', title: 'Out for Delivery', subtitle: 'Orders currently being delivered', icon: Bike, tone: 'teal' },
   { key: 'completed', title: 'Completed', subtitle: 'Finished orders', icon: CheckCircle2, tone: 'neutral' },
 ]
@@ -38,7 +38,7 @@ function paymentMethod(order) {
   return order.payments?.[0]?.method || 'gcash'
 }
 function paymentMethodLabel(method) {
-  return method === 'cod' ? 'Cash on Delivery' : method === 'bank_transfer' ? 'Bank Transfer' : 'GCash'
+  return method === 'cash' ? 'Cash' : method === 'cod' ? 'Cash on Delivery' : method === 'bank_transfer' ? 'Bank Transfer' : 'GCash'
 }
 function paymentStatusLabel(order) {
   const method = paymentMethod(order)
@@ -73,11 +73,14 @@ function timeAgo(dateString) {
 }
 function scheduleLabel(order) {
   const when = scheduleDate(order)
+  if (!when && order.order_type === 'walk-in') return 'Walk-in · Now'
   if (!when) return 'Schedule pending'
   return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(when)
 }
 function filterDateFor(order, view) {
-  const date = view === 'cancelled' ? order.cancellation_requested_at || order.cancelled_at || order.created_at : order.schedule_date
+  const date = view === 'cancelled'
+    ? order.cancellation_requested_at || order.cancelled_at || order.created_at
+    : order.schedule_date || order.created_at
   if (!date) return ''
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date(date).toLocaleDateString('en-CA')
 }
@@ -123,11 +126,11 @@ function mainActionFor(order) {
     return { label: 'Verify Payment', next: null, kind: 'confirm', disabled: !order.payment_proof_path, disabledReason: 'Waiting for the customer to upload payment proof.' }
   }
   if (stage === 'preparing') {
-    return order.order_type === 'pickup'
+    return ['pickup', 'walk-in'].includes(order.order_type)
       ? { label: 'Mark as Ready', next: 'Ready for Pickup', kind: 'advance' }
       : { label: 'Mark Out for Delivery', next: 'Out for Delivery', kind: 'advance' }
   }
-  if (stage === 'ready') return { label: 'Complete Pickup', next: 'Completed', kind: 'advance' }
+  if (stage === 'ready') return { label: order.order_type === 'walk-in' ? 'Complete Order' : 'Complete Pickup', next: 'Completed', kind: 'advance' }
   if (stage === 'delivery') return { label: 'Mark Completed', next: 'Completed', kind: 'advance' }
   return null
 }
@@ -413,8 +416,8 @@ export default function OrderPreparationPage() {
           <span className="sr-only">Search orders</span>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search order number or customer name" />
         </label>
-        <label className="ops-toolbar-field"><span>Fulfillment</span><select value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)}><option value="all">All</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></label>
-        <label className="ops-toolbar-field"><span>Payment method</span><select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="all">All methods</option><option value="gcash">GCash</option><option value="bank_transfer">Bank transfer</option><option value="cod">Cash on Delivery</option></select></label>
+        <label className="ops-toolbar-field"><span>Fulfillment</span><select value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)}><option value="all">All</option><option value="walk-in">Walk-in</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></label>
+        <label className="ops-toolbar-field"><span>Payment method</span><select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="all">All methods</option><option value="cash">Cash</option><option value="gcash">GCash</option><option value="bank_transfer">Bank transfer</option><option value="cod">Cash on Delivery</option></select></label>
         <label className="ops-toolbar-field"><span>Date</span><select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}><option value="">All dates</option><option value={today}>Today</option><option value={yesterday}>Yesterday</option></select></label>
         <label className="ops-toolbar-field"><span>Sort by</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value)}><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="scheduled">{activeTab === 'cancelled' ? 'Cancelled time' : 'Scheduled time'}</option><option value="priority">Priority (overdue first)</option></select></label>
       </div>
@@ -524,7 +527,7 @@ function OrderCard({ order, busy, onView, onMain, onCancel }) {
   return (
     <article className={`ops-card${overdue ? ' is-overdue' : ''}`}>
       <div className="ops-card-top">
-        <span className={`ops-type-badge ${order.order_type}`}>{order.order_type === 'pickup' ? <Package size={13} /> : <Bike size={13} />} {order.order_type === 'pickup' ? 'Pickup' : 'Delivery'}</span>
+        <span className={`ops-type-badge ${order.order_type}`}>{order.order_type === 'delivery' ? <Bike size={13} /> : <Package size={13} />} {order.order_type === 'walk-in' ? 'Walk-in' : order.order_type === 'pickup' ? 'Pickup' : 'Delivery'}</span>
         <span className="ops-time">{timeAgo(order.created_at)}</span>
         {overdue && <span className="ops-overdue-chip"><AlertTriangle size={12} /> Overdue</span>}
       </div>
@@ -742,7 +745,7 @@ function OrderDrawer({ order, addonNames, onClose, onMain, onCancel, busy }) {
     { label: 'Order placed', done: true, at: order.created_at },
     { label: 'Payment verified', done: method === 'cod' || order.payment_confirmed, at: order.payment_confirmed_at },
     { label: 'Preparing', done: !PENDING_STATUSES.includes(order.status) && order.status !== 'Cancelled' },
-    { label: order.order_type === 'pickup' ? 'Ready for pickup' : 'Out for delivery', done: ['Ready for Pickup', 'Out for Delivery', 'Completed'].includes(order.status) },
+    { label: order.order_type === 'delivery' ? 'Out for delivery' : 'Ready for pickup / dine-in / take-out', done: ['Ready for Pickup', 'Out for Delivery', 'Completed'].includes(order.status) },
     { label: 'Completed', done: order.status === 'Completed' },
   ]
 
@@ -750,7 +753,7 @@ function OrderDrawer({ order, addonNames, onClose, onMain, onCancel, busy }) {
     <div className="ops-drawer-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <aside className="ops-drawer" role="dialog" aria-modal="true" aria-labelledby="ops-drawer-title">
         <header>
-          <div><span className="settings-kicker">{order.order_type === 'pickup' ? 'Pickup order' : 'Delivery order'}</span><h2 id="ops-drawer-title">{order.order_number}</h2></div>
+          <div><span className="settings-kicker">{order.order_type === 'walk-in' ? 'Walk-in order' : order.order_type === 'pickup' ? 'Pickup order' : 'Delivery order'}</span><h2 id="ops-drawer-title">{order.order_number}</h2></div>
           <button type="button" onClick={onClose} aria-label="Close order details"><X size={20} /></button>
         </header>
 
@@ -776,7 +779,7 @@ function OrderDrawer({ order, addonNames, onClose, onMain, onCancel, busy }) {
           </section>
 
           <section>
-            <h3>{order.order_type === 'pickup' ? 'Pickup details' : 'Delivery details'}</h3>
+            <h3>{order.order_type === 'delivery' ? 'Delivery details' : order.order_type === 'walk-in' ? 'Dine-in / Take-out details' : 'Pickup details'}</h3>
             {order.order_type === 'delivery' && order.delivery_address && <p><MapPin size={13} /> {order.delivery_address}</p>}
             <p>Scheduled: {scheduleLabel(order)}</p>
           </section>

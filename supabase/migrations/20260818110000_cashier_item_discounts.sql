@@ -1,7 +1,5 @@
--- Fix cashier checkout for deployments whose payments table has no cashier_id column.
--- Cashier attribution is stored on orders.cashier_id.
+-- Apply cashier PWD/Senior discounts only to selected item base prices.
 
--- Atomic, server-authoritative cashier checkout.
 create or replace function public.create_cashier_order(request_payload jsonb) returns jsonb
 language plpgsql security definer set search_path=public as $$
 declare
@@ -72,3 +70,5 @@ begin
 end; $$;
 revoke all on function public.create_cashier_order(jsonb) from public;
 grant execute on function public.create_cashier_order(jsonb) to authenticated;
+
+notify pgrst, 'reload schema';

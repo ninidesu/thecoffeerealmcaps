@@ -6225,126 +6225,230 @@ html[data-theme='dark'] .cashier-v2 .customize-add-button:hover {
 }
 
 /* --- Theme-invariant geometry: switching palettes must not reflow the modal --- */
+.cashier-modal-portal {
+  display: contents !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-custom-backdrop.customize-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+  align-items: center !important;
+  justify-items: center !important;
+  padding: 16px !important;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+}
+
 html[data-theme] .cashier-v2 .cashier-custom-modal.customize-modal {
-  width: min(760px, calc(100vw - 24px)) !important;
-  max-height: min(800px, calc(100dvh - 24px)) !important;
+  width: min(900px, calc(100vw - 32px)) !important;
+  max-width: calc(100vw - 32px) !important;
+  max-height: min(900px, calc(100dvh - 32px)) !important;
+  min-height: 0 !important;
   display: grid !important;
   grid-template-rows: auto minmax(0, 1fr) auto !important;
+  box-sizing: border-box !important;
 }
 
 html[data-theme] .cashier-v2 .customize-modal-header {
-  grid-template-columns: 68px minmax(0, 1fr) 44px !important;
-  gap: 14px !important;
-  min-height: 92px !important;
-  padding: 12px 16px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  grid-template-columns: 88px minmax(0, 1fr) 50px !important;
+  gap: 18px !important;
+  min-height: 116px !important;
+  padding: 16px 22px !important;
 }
 
 html[data-theme] .cashier-v2 .customize-modal-header > img {
-  width: 68px !important;
-  height: 68px !important;
+  width: 88px !important;
+  height: 88px !important;
+  border-radius: 12px !important;
+}
+
+html[data-theme] .cashier-v2 .customize-product-info > span,
+html[data-theme] .cashier-v2 .customize-section-head > span {
+  font-size: 0.74rem !important;
+}
+
+html[data-theme] .cashier-v2 .customize-product-info h2 {
+  font-size: 1.55rem !important;
+}
+
+html[data-theme] .cashier-v2 .customize-product-info p {
+  font-size: 0.82rem !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-custom-modal.customize-modal .customize-close {
+  position: static !important;
+  grid-column: 3 !important;
+  justify-self: end !important;
+  margin: 0 !important;
+  transform: none !important;
+  width: 50px !important;
+  min-width: 50px !important;
+  height: 50px !important;
+  min-height: 50px !important;
+  font-size: 1.55rem !important;
 }
 
 html[data-theme] .cashier-v2 .customize-modal-body {
   display: grid !important;
   grid-template-columns: 1fr !important;
-  gap: 14px !important;
-  padding: 14px 16px 16px !important;
+  gap: 18px !important;
+  min-height: 0 !important;
+  padding: 18px 22px 22px !important;
   overflow-y: auto !important;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
 }
 
 html[data-theme] .cashier-v2 .customize-choice-list {
   display: grid !important;
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 10px !important;
+  gap: 14px !important;
 }
 
 html[data-theme] .cashier-v2 .customize-choice-section,
 html[data-theme] .cashier-v2 .customize-addons-section {
-  padding: 11px !important;
+  padding: 16px !important;
+  border-radius: 12px !important;
+}
+
+html[data-theme] .cashier-v2 .customize-section-head h3 {
+  font-size: 0.92rem !important;
 }
 
 html[data-theme] .cashier-v2 .customize-choice-grid {
-  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)) !important;
-  gap: 8px !important;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)) !important;
+  gap: 10px !important;
 }
 
 html[data-theme] .cashier-v2 .customize-addons-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 8px !important;
+  gap: 10px !important;
 }
 
 html[data-theme] .cashier-v2 .customize-choice-button,
 html[data-theme] .cashier-v2 .customize-addon-button {
+  min-height: 54px !important;
+  padding: 10px 13px !important;
+  font-size: 0.85rem !important;
+}
+
+html[data-theme] .cashier-v2 .customize-temperature-section {
+  align-self: start !important;
+  align-content: start !important;
+  gap: 10px !important;
+}
+
+html[data-theme] .cashier-v2 .customize-temperature-section .customize-section-head {
+  margin-bottom: 0 !important;
+}
+
+html[data-theme] .cashier-v2 .customize-temperature-section .customize-choice-grid {
+  grid-template-columns: repeat(2, minmax(92px, 1fr)) !important;
+  align-items: start !important;
+  gap: 8px !important;
+}
+
+html[data-theme] .cashier-v2 .customize-temperature-section .customize-choice-button {
+  height: 46px !important;
   min-height: 46px !important;
+  padding: 8px 10px !important;
+}
+
+html[data-theme] .cashier-v2 .customize-variant-section,
+html[data-theme] .cashier-v2 .customize-ice-section {
+  grid-column: 1 / -1 !important;
+}
+
+html[data-theme] .cashier-v2 .customize-ice-section {
+  align-self: start !important;
+  align-content: start !important;
+}
+
+html[data-theme] .cashier-v2 .customize-ice-section .customize-choice-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+html[data-theme] .cashier-v2 .customize-choice-label {
+  font-size: 0.85rem !important;
+}
+
+html[data-theme] .cashier-v2 .customize-choice-button small,
+html[data-theme] .cashier-v2 .customize-addon-button > b {
+  font-size: 0.74rem !important;
+}
+
+html[data-theme] .cashier-v2 .customize-standard-note {
+  font-size: 0.86rem !important;
 }
 
 html[data-theme] .cashier-v2 .customize-modal-footer {
   display: grid !important;
-  grid-template-columns: auto minmax(0, 1fr) minmax(180px, 210px) !important;
+  grid-template-columns: minmax(110px, auto) minmax(210px, 1fr) minmax(220px, 250px) !important;
+  gap: 14px !important;
+  min-height: 88px !important;
+  padding: 14px 22px max(14px, env(safe-area-inset-bottom)) !important;
+}
+
+html[data-theme] .cashier-v2 .customize-total span,
+html[data-theme] .cashier-v2 .customize-quantity > span {
+  font-size: 0.72rem !important;
+}
+
+html[data-theme] .cashier-v2 .customize-total b {
+  font-size: 1.5rem !important;
+}
+
+html[data-theme] .cashier-v2 .customize-quantity {
+  display: grid !important;
+  grid-template-columns: auto 144px !important;
+  align-items: center !important;
+  justify-content: start !important;
   gap: 12px !important;
-  min-height: 74px !important;
-  padding: 11px 16px max(11px, env(safe-area-inset-bottom)) !important;
+  min-width: 0 !important;
+}
+
+html[data-theme] .cashier-v2 .customize-quantity > span {
+  white-space: nowrap !important;
 }
 
 html[data-theme] .cashier-v2 .customize-stepper {
-  grid-template-columns: 40px 44px 40px !important;
-  min-height: 42px !important;
+  grid-template-columns: 46px 52px 46px !important;
+  width: 144px !important;
+  max-width: 144px !important;
+  min-height: 48px !important;
 }
 
 html[data-theme] .cashier-v2 .customize-stepper button {
-  width: 40px !important;
-  min-width: 40px !important;
-  height: 42px !important;
-  min-height: 42px !important;
+  width: 46px !important;
+  min-width: 46px !important;
+  height: 48px !important;
+  min-height: 48px !important;
 }
 
 html[data-theme] .cashier-v2 .customize-stepper strong {
-  width: 44px !important;
-  min-width: 44px !important;
-  height: 42px !important;
+  width: 52px !important;
+  min-width: 52px !important;
+  height: 48px !important;
+  font-size: 1rem !important;
 }
 
-@media (max-width: 640px) {
-  html[data-theme] .cashier-v2 .cashier-custom-modal.customize-modal {
-    width: calc(100vw - 16px) !important;
-    max-height: calc(100dvh - 16px) !important;
-  }
+html[data-theme] .cashier-v2 .customize-add-button {
+  min-height: 56px !important;
+  font-size: 0.95rem !important;
+}
 
-  html[data-theme] .cashier-v2 .customize-modal-header {
-    grid-template-columns: 56px minmax(0, 1fr) 44px !important;
-    gap: 10px !important;
-    min-height: 80px !important;
-    padding: 10px !important;
-  }
-
-  html[data-theme] .cashier-v2 .customize-modal-header > img {
-    width: 56px !important;
-    height: 56px !important;
-  }
-
-  html[data-theme] .cashier-v2 .customize-product-info h2 {
-    font-size: 1.12rem !important;
-  }
-
-  html[data-theme] .cashier-v2 .customize-modal-body {
-    grid-template-columns: 1fr !important;
-    padding: 10px !important;
-  }
-
-  html[data-theme] .cashier-v2 .customize-choice-list {
-    grid-template-columns: 1fr !important;
-    gap: 10px !important;
-  }
-
-  html[data-theme] .cashier-v2 .customize-choice-section:only-child {
-    grid-column: auto !important;
-  }
-
+@media (max-width: 760px) {
   html[data-theme] .cashier-v2 .customize-modal-footer {
-    grid-template-columns: minmax(0, 1fr) auto !important;
-    gap: 9px !important;
-    min-height: 0 !important;
-    padding: 9px 10px max(9px, env(safe-area-inset-bottom)) !important;
+    grid-template-columns: minmax(110px, 1fr) auto !important;
+    gap: 10px !important;
   }
 
   html[data-theme] .cashier-v2 .customize-total {
@@ -6353,7 +6457,96 @@ html[data-theme] .cashier-v2 .customize-stepper strong {
   }
 
   html[data-theme] .cashier-v2 .customize-quantity {
-    justify-content: flex-start !important;
+    justify-content: end !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-add-button {
+    grid-column: 1 / -1 !important;
+    grid-row: 2 !important;
+  }
+}
+
+@media (max-width: 640px) {
+  html[data-theme] .cashier-v2 .cashier-custom-backdrop.customize-backdrop {
+    padding: 8px !important;
+  }
+
+  html[data-theme] .cashier-v2 .cashier-custom-modal.customize-modal {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 16px) !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-modal-header {
+    grid-template-columns: 64px minmax(0, 1fr) 46px !important;
+    gap: 12px !important;
+    min-height: 92px !important;
+    padding: 12px !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-modal-header > img {
+    width: 64px !important;
+    height: 64px !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-product-info h2 {
+    font-size: 1.25rem !important;
+  }
+
+  html[data-theme] .cashier-v2 .cashier-custom-modal.customize-modal .customize-close {
+    width: 46px !important;
+    min-width: 46px !important;
+    height: 46px !important;
+    min-height: 46px !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-modal-body {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+    padding: 14px !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-choice-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-choice-section:only-child {
+    grid-column: auto !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-modal-footer {
+    grid-template-columns: minmax(104px, auto) 144px minmax(150px, 1fr) !important;
+    gap: 10px !important;
+    min-height: 0 !important;
+    padding: 12px 14px max(12px, env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-total {
+    padding-right: 0 !important;
+    border-right: 0 !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-quantity {
+    grid-template-columns: 144px !important;
+    justify-content: start !important;
+    justify-items: start !important;
+    gap: 5px !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-add-button {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+  }
+}
+
+@media (max-width: 520px) {
+  html[data-theme] .cashier-v2 .customize-choice-list {
+    grid-template-columns: 1fr !important;
+  }
+
+  html[data-theme] .cashier-v2 .customize-modal-footer {
+    grid-template-columns: minmax(100px, 1fr) 144px !important;
   }
 
   html[data-theme] .cashier-v2 .customize-add-button {

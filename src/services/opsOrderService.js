@@ -7,7 +7,7 @@ export async function fetchOpsOrders() {
   const { data, error } = await supabase
     .from('orders')
     .select(ACTIVE_SELECT)
-    .eq('order_source', 'customer_pos')
+    .in('order_source', ['customer_pos', 'cashier_pos'])
     .order('created_at', { ascending: true })
   if (error) throw error
   return data || []

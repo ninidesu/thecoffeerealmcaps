@@ -4,10 +4,10 @@ language plpgsql security definer set search_path=public as $$
 declare
  o jsonb:=coalesce(request_payload->'order','{}'); p jsonb:=coalesce(request_payload->'payment','{}'); i jsonb; m public.menu_items%rowtype;
  oid uuid:=gen_random_uuid(); ono text:='WI-'||to_char(clock_timestamp(),'YYYYMMDD-HH24MISS')||'-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,4));
- q integer; total_q integer:=0; base numeric(12,2); adds numeric(12,2); unit numeric(12,2); line numeric(12,2); sub numeric(12,2):=0;
+ q integer; total_q integer:=0; base numeric(12,2); adds numeric(12,2); unit numeric(12,2); line numeric(12,2); sub numeric(12,2):=0; discounted_sub numeric(12,2):=0;
  dtype text:=nullif(btrim(o->>'discount_type'),''); discount numeric(12,2):=0; grand numeric(12,2);
  method text:=lower(btrim(coalesce(p->>'method',''))); received numeric(12,2); change_due numeric(12,2);
- requested_addons integer; valid_addons integer; temperature text; variant text;
+ requested_addons integer; valid_addons integer; temperature text; variant text; is_discounted boolean;
 begin
  if auth.uid() is null then raise exception 'Authentication required'; end if;
  if not exists(select 1 from public.profiles where id=auth.uid() and role in ('admin','cashier')) then raise exception 'Cashier access required'; end if;
@@ -35,11 +35,13 @@ begin
    and (a.target_temperature='both' or (a.target_temperature in ('iced','cold') and temperature in ('iced','cold')) or (a.target_temperature='hot' and temperature='hot'));
   if valid_addons<>requested_addons then raise exception 'One or more selected add-ons are unavailable for this item'; end if;
   sub:=sub+((base+adds)*q);
+  if dtype is not null and coalesce((i->>'is_discounted')::boolean,false) then discounted_sub:=discounted_sub+(base*q); end if;
  end loop;
  if dtype is not null then
   if dtype not in ('PWD','Senior') then raise exception 'Unsupported discount type'; end if;
   if nullif(btrim(o->>'discount_customer_name'),'') is null or nullif(btrim(o->>'discount_id_number'),'') is null then raise exception 'Discount customer name and ID number are required'; end if;
-  discount:=round(sub*0.20,2);
+  if discounted_sub <= 0 then raise exception 'At least one item must be selected for the discount'; end if;
+  discount:=round(discounted_sub*0.20,2);
  end if;
  grand:=sub-discount;
  if method not in ('cash','gcash','bank_transfer') then raise exception 'Unsupported payment method'; end if;
@@ -52,14 +54,14 @@ begin
   if coalesce(p->>'reference_number','') !~ '^[A-Za-z0-9-]{6,30}$' then raise exception 'Bank reference must be 6 to 30 letters, numbers, or hyphens'; end if; received:=grand; change_due:=0;
  end if;
  insert into public.orders(id,order_number,order_sequence,order_source,cashier_id,order_type,status,customer_name,subtotal,discount_type,discount_customer_name,discount_id_number,discount_subtotal,discount_amount,final_total,payment_status,payment_confirmed)
- values(oid,ono,floor(extract(epoch from clock_timestamp()))::bigint,'cashier_pos',auth.uid(),'walk-in','Ordered',coalesce(nullif(btrim(o->>'customer_name'),''),'Walk-in Customer'),sub,dtype,nullif(btrim(o->>'discount_customer_name'),''),nullif(btrim(o->>'discount_id_number'),''),case when dtype is null then 0 else sub end,discount,grand,'paid',true);
+ values(oid,ono,floor(extract(epoch from clock_timestamp()))::bigint,'cashier_pos',auth.uid(),'walk-in','Preparing',coalesce(nullif(btrim(o->>'customer_name'),''),'Walk-in Customer'),sub,dtype,nullif(btrim(o->>'discount_customer_name'),''),nullif(btrim(o->>'discount_id_number'),''),case when dtype is null then 0 else discounted_sub end,discount,grand,'paid',true);
  for i in select * from jsonb_array_elements(request_payload->'items') loop
   select * into m from public.menu_items where id=(i->>'menu_item_id')::uuid; q:=(i->>'quantity')::integer; base:=m.price; variant:=nullif(btrim(i->'customizations'->>'variantKey'),'');
   if variant is not null then base:=(m.variant_options->'prices'->>variant)::numeric; end if;
   select coalesce(sum(a.price),0) into adds from public.addons a where lower(a.name) in(select lower(btrim(x->>'name')) from jsonb_array_elements(coalesce(i->'addons','[]')) x) and a.is_available=true;
-  unit:=base+adds; line:=unit*q;
+  unit:=base+adds; line:=unit*q; is_discounted:=dtype is not null and coalesce((i->>'is_discounted')::boolean,false);
   insert into public.order_items(order_id,menu_item_id,item_name,unit_price,quantity,line_total,is_discounted,discount_amount,customizations,addons)
-  values(oid,m.id,m.name,unit,q,line,dtype is not null,case when dtype is null then 0 else round(line*0.20,2) end,coalesce(i->'customizations','{}'),coalesce(i->'addons','[]'));
+  values(oid,m.id,m.name,unit,q,line,is_discounted,case when is_discounted then round(base*q*0.20,2) else 0 end,coalesce(i->'customizations','{}'),coalesce(i->'addons','[]'));
  end loop;
  insert into public.payments(order_id,method,amount_due,amount_received,change_amount,reference_number,account_number,bank_name,status,paid_at,cashier_id)
  values(oid,method,grand,received,change_due,nullif(p->>'reference_number',''),nullif(p->>'account_number',''),nullif(p->>'bank_name',''),'paid',now(),auth.uid());
