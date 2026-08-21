@@ -84,7 +84,7 @@ export default function ContentManagementPage() {
     update('featured', { itemIds: next })
   }
 
-  return <AppShell role="admin" title="Content Management" eyebrow="Control the customer-facing story without changing menu or order data." onRefresh={() => setRefreshSignal((value) => value + 1)}>
+  return <AppShell role="admin" title="Content Management" onRefresh={() => setRefreshSignal((value) => value + 1)}>
     <section className="ac-workspace">
       <header className="ac-overview">
         <div><span className="ac-overview-icon"><FileText size={21}/></span><div><h2>Storefront content</h2><p>Update each area independently, then preview the customer homepage.</p></div></div>

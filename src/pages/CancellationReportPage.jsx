@@ -145,9 +145,9 @@ function BreakdownChart({ title, subtitle, data, type, colors = ['#315c45', '#6e
       {!entries.length ? <CompactEmpty type={type} text={`No ${type === 'refund' ? 'refunds' : 'cancellations'} recorded for this period.`} /> : (
         <ul className="cancel-bars">
           {entries.slice(0, 5).map(([label, value], index) => (
-            <li key={label}>
+            <li key={`${label}-${value}`} className="cancel-bar-row" style={{ '--cancel-bar-delay': `${index * 70}ms` }}>
               <div><span title={label}>{label}</span><b>{value} <small>{total ? Math.round((value / total) * 100) : 0}%</small></b></div>
-              <i><span style={{ width: `${(value / entries[0][1]) * 100}%`, background: colors[index % colors.length] }} /></i>
+              <i role="img" aria-label={`${label}: ${value} ${type === 'refund' ? 'refunds' : 'cancellations'}`}><span style={{ '--cancel-bar-width': `${(value / entries[0][1]) * 100}%`, background: colors[index % colors.length] }} /></i>
             </li>
           ))}
         </ul>
@@ -157,6 +157,7 @@ function BreakdownChart({ title, subtitle, data, type, colors = ['#315c45', '#6e
 }
 
 function TrendChart({ points, granularity, onGranularityChange, view }) {
+  const [hoverIndex, setHoverIndex] = useState(null)
   const width = 760
   const height = 230
   const inset = { left: 34, right: 16, top: 20, bottom: 34 }
@@ -169,6 +170,9 @@ function TrendChart({ points, granularity, onGranularityChange, view }) {
   const yFor = (value) => inset.top + chartHeight - (value / maximum) * chartHeight
   const pathFor = (key) => points.map((point, index) => `${index ? 'L' : 'M'} ${xFor(index)} ${yFor(point[key])}`).join(' ')
   const labels = points.length > 8 ? points.filter((_, index) => index % Math.ceil(points.length / 7) === 0 || index === points.length - 1) : points
+  const activePoint = hoverIndex == null ? null : points[hoverIndex]
+  const chartKey = `${view}:${points.map((point) => `${point.key}:${point[seriesKey]}`).join('|')}`
+  const areaPath = `${pathFor(seriesKey)} L ${xFor(points.length - 1)} ${inset.top + chartHeight} L ${xFor(0)} ${inset.top + chartHeight} Z`
 
   return (
     <article className="panel cancel-panel cancel-trend-panel">
@@ -180,17 +184,22 @@ function TrendChart({ points, granularity, onGranularityChange, view }) {
       </div>
       {!points.some((point) => point[seriesKey]) ? <CompactEmpty type={view === 'refunds' ? 'refund' : 'cancellation'} text={`No ${seriesLabel.toLowerCase()} to chart in this period.`} /> : (
         <div className="cancel-trend-chart">
-          <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${seriesLabel} trend chart`}>
+          <svg key={chartKey} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${seriesLabel} trend chart`}>
             {[0, .25, .5, .75, 1].map((position) => <line key={position} x1={inset.left} x2={width - inset.right} y1={inset.top + chartHeight * position} y2={inset.top + chartHeight * position} className="cancel-grid-line" />)}
-            <path d={pathFor(seriesKey)} className={`cancel-line cancel-line-${view === 'refunds' ? 'refunded' : 'cancelled'}`} />
-            {points.map((point, index) => <g key={point.key}>
-              <circle cx={xFor(index)} cy={yFor(point[seriesKey])} r="4" className={`cancel-dot cancel-dot-${view === 'refunds' ? 'refunded' : 'cancelled'}`}><title>{point.label}: {point[seriesKey]} {seriesLabel.toLowerCase()}</title></circle>
+            {activePoint && <line x1={xFor(hoverIndex)} x2={xFor(hoverIndex)} y1={inset.top} y2={inset.top + chartHeight} className="cancel-hover-guide" />}
+            <defs><linearGradient id={`cancelTrendArea-${view}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" className={`cancel-area-stop-${view === 'refunds' ? 'refunded' : 'cancelled'}`} /><stop offset="1" className="cancel-area-stop-end" /></linearGradient></defs>
+            <path d={areaPath} className={`cancel-area cancel-area-${view === 'refunds' ? 'refunded' : 'cancelled'}`} fill={`url(#cancelTrendArea-${view})`} />
+            <path pathLength="1" d={pathFor(seriesKey)} className={`cancel-line cancel-line-${view === 'refunds' ? 'refunded' : 'cancelled'} cancel-animated-path`} />
+            {points.map((point, index) => <g key={`${point.key}-${point[seriesKey]}`} className="cancel-chart-point" style={{ '--cancel-point-delay': `${Math.min(index, 8) * 55 + 130}ms` }}>
+              <circle cx={xFor(index)} cy={yFor(point[seriesKey])} r={hoverIndex === index ? 5.5 : 4} className={`cancel-dot cancel-dot-${view === 'refunds' ? 'refunded' : 'cancelled'}${hoverIndex === index ? ' is-active' : ''}`}><title>{point.label}: {point[seriesKey]} {seriesLabel.toLowerCase()}</title></circle>
+              <circle cx={xFor(index)} cy={yFor(point[seriesKey])} r="22" fill="transparent" tabIndex={0} role="img" aria-label={`${point.label}: ${point[seriesKey]} ${seriesLabel.toLowerCase()}`} onMouseEnter={() => setHoverIndex(index)} onMouseLeave={() => setHoverIndex((current) => current === index ? null : current)} onFocus={() => setHoverIndex(index)} onBlur={() => setHoverIndex((current) => current === index ? null : current)} />
             </g>)}
             {labels.map((point) => {
               const index = points.indexOf(point)
               return <text key={`label-${point.key}`} x={xFor(index)} y={height - 8} textAnchor="middle" className="cancel-axis-label">{point.label}</text>
             })}
           </svg>
+          {activePoint && <div className="dash-chart-tooltip cancel-chart-tooltip" style={{ left: `${(xFor(hoverIndex) / width) * 100}%`, top: `${(yFor(activePoint[seriesKey]) / height) * 100}%` }}><b>{activePoint.label}</b><span>{activePoint[seriesKey]} {seriesLabel.toLowerCase()}</span></div>}
           <div className="cancel-chart-legend"><span><i className={view === 'refunds' ? 'refunded' : 'cancelled'} />{seriesLabel}</span></div>
         </div>
       )}
@@ -396,29 +405,47 @@ export default function CancellationReportPage() {
     switchTab(activeTab === 'cancellations' ? 'refunds' : 'cancellations')
   }
 
-  return <AppShell role="admin" title="Cancellations & Refunds" eyebrow="Review stopped orders and follow each payment return to completion." onRefresh={load}>
-    <section className="cancel-workspace-tabs" role="tablist" aria-label="Cancellation and refund views" onKeyDown={onTabKeyDown}>
-      <button id="cancellations-tab" type="button" role="tab" aria-selected={activeTab === 'cancellations'} aria-controls="cancellations-panel" tabIndex={activeTab === 'cancellations' ? 0 : -1} className={activeTab === 'cancellations' ? 'active' : ''} onClick={() => switchTab('cancellations')}>
-        <span className="cancel-tab-icon"><Ban size={19} /></span><span><b>Cancellations</b><small>Reasons, voids, and stopped orders</small></span><strong>{cancellationCurrent.length}</strong>
+  const titleTabs = (
+    <div className="cancel-title-tabs" role="tablist" aria-label="Cancellation and refund views" onKeyDown={onTabKeyDown}>
+      <button id="cancellations-tab" type="button" role="tab" aria-label="Cancellations — reasons, voids, and stopped orders" title="Reasons, voids, and stopped orders" aria-selected={activeTab === 'cancellations'} aria-controls="cancellations-panel" tabIndex={activeTab === 'cancellations' ? 0 : -1} className={activeTab === 'cancellations' ? 'active' : ''} onClick={() => switchTab('cancellations')}>
+        <Ban size={15} aria-hidden="true" /><span>Cancellations</span><strong>{cancellationCurrent.length}</strong>
       </button>
-      <button id="refunds-tab" type="button" role="tab" aria-selected={activeTab === 'refunds'} aria-controls="refunds-panel" tabIndex={activeTab === 'refunds' ? 0 : -1} className={activeTab === 'refunds' ? 'active' : ''} onClick={() => switchTab('refunds')}>
-        <span className="cancel-tab-icon"><Undo2 size={19} /></span><span><b>Refunds</b><small>Payment returns and current status</small></span><strong>{refundCurrent.length}</strong>
+      <button id="refunds-tab" type="button" role="tab" aria-label="Refunds — payment returns and current status" title="Payment returns and current status" aria-selected={activeTab === 'refunds'} aria-controls="refunds-panel" tabIndex={activeTab === 'refunds' ? 0 : -1} className={activeTab === 'refunds' ? 'active' : ''} onClick={() => switchTab('refunds')}>
+        <Undo2 size={15} aria-hidden="true" /><span>Refunds</span><strong>{refundCurrent.length}</strong>
       </button>
-    </section>
-    <section className="cancel-range-toolbar" aria-label="Report date range">
-      <div className="cancel-range-display"><CalendarDays size={16} /><span>{range.label}</span></div>
-      <div className="cancel-presets">{PRESETS.map(([value, label]) => <button type="button" className={preset === value ? 'active' : ''} onClick={() => setPreset(value)} key={value}>{label}</button>)}</div>
-      {preset === 'custom' && <div className="cancel-custom-range"><label>From<input type="date" value={customFrom} max={customTo} onChange={(event) => setCustomFrom(event.target.value)} /></label><span>to</span><label>To<input type="date" value={customTo} min={customFrom} onChange={(event) => setCustomTo(event.target.value)} /></label></div>}
-      <div className="inv-overflow cancel-export-control">
-        <button className="ops-main-action inv-record-btn cancel-export" type="button" disabled={loading || searchedRecords.length === 0 || Boolean(exporting)} aria-label={`Export ${activeTab === 'refunds' ? 'refunds' : 'cancellations'} report`} aria-haspopup="menu" aria-expanded={exportMenuOpen} onClick={(event) => { event.stopPropagation(); setExportMenuOpen((open) => !open) }}>
-          <Download size={16} /> {exporting ? 'Preparing…' : 'Export'} <ChevronDown size={14} />
-        </button>
-        {exportMenuOpen && <div className="inv-overflow-menu txn-export-menu cancel-export-menu" role="menu">
-          <button type="button" role="menuitem" onClick={runExportPdf}><ReceiptText size={14} /> Export as PDF</button>
-          <button type="button" role="menuitem" onClick={runExportXlsx}><FileText size={14} /> Export as XLSX</button>
-        </div>}
+    </div>
+  )
+
+  return <AppShell role="admin" title="Cancellations & Refunds" titleActions={titleTabs} onRefresh={load}>
+    <section className="cancel-range-toolbar report-filter-bar" aria-label="Report date range">
+      <div className="cancel-range-display report-filter-label"><CalendarDays size={16} aria-hidden="true" /><span><b>Report range</b><small>{range.label}</small></span></div>
+      <div className="cancel-presets report-filter-presets is-four" role="group" aria-label="Cancellation and refund report period">{PRESETS.map(([value, label]) => <button type="button" className={preset === value ? 'active' : ''} aria-pressed={preset === value} aria-expanded={value === 'custom' ? preset === value : undefined} aria-controls={value === 'custom' ? 'cancellation-report-custom-range' : undefined} onClick={() => setPreset(value)} key={value}>{label}</button>)}</div>
+      <div className="report-filter-actions is-two">
+        <div className="inv-overflow cancel-export-control report-filter-export-wrap">
+          <button className="ops-main-action inv-record-btn cancel-export report-filter-export" type="button" disabled={loading || searchedRecords.length === 0 || Boolean(exporting)} aria-label={`Export ${activeTab === 'refunds' ? 'refunds' : 'cancellations'} report`} aria-haspopup="menu" aria-expanded={exportMenuOpen} onClick={(event) => { event.stopPropagation(); setExportMenuOpen((open) => !open) }}>
+            <Download size={14} /> {exporting ? 'Preparing…' : 'Export'} <ChevronDown size={13} />
+          </button>
+          {exportMenuOpen && <div className="inv-overflow-menu txn-export-menu cancel-export-menu" role="menu">
+            <button type="button" role="menuitem" onClick={runExportPdf}><ReceiptText size={14} /> Export as PDF</button>
+            <button type="button" role="menuitem" onClick={runExportXlsx}><FileText size={14} /> Export as XLSX</button>
+          </div>}
+        </div>
+        <button type="button" className="cancel-filter-toggle report-filter-toggle" aria-expanded={filtersOpen} aria-controls="cancellation-report-extra-filters" onClick={() => setFiltersOpen((open) => !open)}><Filter size={15} /> {filtersOpen ? 'Hide filters' : 'More filters'}{activeFilterCount > 0 && <span>{activeFilterCount}</span>}</button>
       </div>
     </section>
+    {preset === 'custom' && <div className="report-filter-popout cancel-custom-popout" id="cancellation-report-custom-range" role="group" aria-label="Custom cancellation and refund report date range"><div className="report-filter-popout-copy"><CalendarDays size={15} aria-hidden="true" /><span><b>Custom date range</b><small>Choose the start and end dates for this report.</small></span></div><div className="cancel-custom-range report-filter-date-range"><label>From<input type="date" value={customFrom} max={customTo} onChange={(event) => setCustomFrom(event.target.value)} /></label><span>to</span><label>To<input type="date" value={customTo} min={customFrom} onChange={(event) => setCustomTo(event.target.value)} /></label></div></div>}
+    {filtersOpen && <div className="cancel-filter-panel report-filter-popout report-filter-panel" id="cancellation-report-extra-filters" aria-label={`${activeTab === 'refunds' ? 'Refund' : 'Cancellation'} filters`}>
+      <div className="cancel-filter-grid report-filter-fields">
+        {activeTab === 'cancellations' && <label>Cancellation reason<select value={reason} onChange={(event) => setReason(event.target.value)}><option value="all">All reasons</option>{reasons.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>}
+        <label>Order type<select value={orderType} onChange={(event) => setOrderType(event.target.value)}><option value="all">All order types</option>{Object.entries(ORDER_TYPE_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label>Payment method<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option value="all">All methods</option>{Object.entries(PAYMENT_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        {activeTab === 'refunds' && <label>Refund status<select value={refundStatus} onChange={(event) => setRefundStatus(event.target.value)}><option value="all">All refund states</option>{Object.entries(REFUND_STATUS_LABEL).filter(([value]) => value !== 'not_applicable').map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>}
+        {activeTab === 'cancellations' && <label>Cancelled by<select value={cancelledBy} onChange={(event) => setCancelledBy(event.target.value)}><option value="all">All roles</option>{cancelledByOptions.map((value) => <option value={value} key={value}>{startCase(value)}</option>)}</select></label>}
+        <label>Minimum {activeTab === 'refunds' ? 'refund' : 'order'} amount<input type="number" inputMode="decimal" min="0" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} placeholder="PHP 0" /></label>
+        <label>Maximum amount<input type="number" min="0" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} placeholder="No maximum" /></label>
+      </div>
+      <div className="cancel-filter-actions"><button type="button" className="button button-outline" onClick={resetFilters}><RotateCcw size={15} /> Reset All</button><button type="button" className="button button-dark" onClick={() => setFiltersOpen(false)}>Show {searchedRecords.length} records</button></div>
+    </div>}
 
     {error && <div className="cancel-error" role="alert"><ShieldAlert size={19} /><div><b>Report unavailable</b><span>{error}</span></div><button type="button" onClick={load}><RefreshCw size={15} /> Retry</button></div>}
     {exportError && <div className="cancel-export-error" role="alert"><ShieldAlert size={16} /><span>{exportError}</span><button type="button" onClick={() => setExportError('')} aria-label="Dismiss export error"><X size={14} /></button></div>}
@@ -455,23 +482,8 @@ export default function CancellationReportPage() {
           <div className="cancel-record-tools">
             <label className="search cancel-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={activeTab === 'refunds' ? 'Search order, customer, reference...' : 'Search order, customer, reason...'} aria-label={`Search ${activeTab} records`} />{search && <button type="button" onClick={() => setSearch('')} aria-label="Clear search"><X size={14} /></button>}</label>
             <select value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label={`Sort ${activeTab} records`}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="highest">Highest amount</option><option value="lowest">Lowest amount</option></select>
-            <button className={`button button-soft cancel-filter-button${filtersOpen ? ' active' : ''}`} type="button" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen}><Filter size={16} /> Filters {activeFilterCount > 0 && <b>{activeFilterCount}</b>}</button>
           </div>
         </div>
-
-        {filtersOpen && <div className="cancel-filter-panel">
-          <div className="cancel-filter-panel-head"><div><span className="eyebrow">Refine records</span><h3>{activeTab === 'refunds' ? 'Refund filters' : 'Cancellation filters'}</h3></div><button type="button" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X size={17} /></button></div>
-          <div className="cancel-filter-grid">
-            {activeTab === 'cancellations' && <label>Cancellation reason<select value={reason} onChange={(event) => setReason(event.target.value)}><option value="all">All reasons</option>{reasons.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>}
-            <label>Order type<select value={orderType} onChange={(event) => setOrderType(event.target.value)}><option value="all">All order types</option>{Object.entries(ORDER_TYPE_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label>Payment method<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option value="all">All methods</option>{Object.entries(PAYMENT_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            {activeTab === 'refunds' && <label>Refund status<select value={refundStatus} onChange={(event) => setRefundStatus(event.target.value)}><option value="all">All refund states</option>{Object.entries(REFUND_STATUS_LABEL).filter(([value]) => value !== 'not_applicable').map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>}
-            {activeTab === 'cancellations' && <label>Cancelled by<select value={cancelledBy} onChange={(event) => setCancelledBy(event.target.value)}><option value="all">All roles</option>{cancelledByOptions.map((value) => <option value={value} key={value}>{startCase(value)}</option>)}</select></label>}
-            <label>Minimum {activeTab === 'refunds' ? 'refund' : 'order'} amount<input type="number" inputMode="decimal" min="0" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} placeholder="PHP 0" /></label>
-            <label>Maximum amount<input type="number" min="0" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} placeholder="No maximum" /></label>
-          </div>
-          <div className="cancel-filter-actions"><button type="button" className="button button-outline" onClick={resetFilters}><RotateCcw size={15} /> Reset All</button><button type="button" className="button button-dark" onClick={() => setFiltersOpen(false)}>Show {searchedRecords.length} records</button></div>
-        </div>}
 
         {activeFilterCount > 0 && <div className="cancel-active-filters"><SlidersHorizontal size={14} /><span>{activeFilterCount} active filter{activeFilterCount === 1 ? '' : 's'}</span><button type="button" onClick={resetFilters}>Clear all</button></div>}
 

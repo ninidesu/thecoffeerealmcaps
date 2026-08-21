@@ -64,7 +64,7 @@ export default function SystemSettingsPage() {
   }
 
   const lastSaved = updatedAt ? new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(updatedAt)) : 'Defaults in use'
-  return <AppShell role="admin" title="System Settings" eyebrow="Manage store operations that affect customer ordering and payment." onRefresh={() => setRefreshSignal((value) => value + 1)}>
+  return <AppShell role="admin" title="System Settings" onRefresh={() => setRefreshSignal((value) => value + 1)}>
     <section className="ac-workspace">
       <header className="ac-overview">
         <div><span className="ac-overview-icon"><Database size={21}/></span><div><h2>Operational configuration</h2><p>Settings are grouped by where they affect the customer and staff experience.</p></div></div>

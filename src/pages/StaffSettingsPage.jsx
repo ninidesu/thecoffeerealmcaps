@@ -183,7 +183,7 @@ export default function StaffSettingsPage({ role = 'staff' }) {
     })
   }
 
-  return <AppShell role={role} title="Settings" eyebrow={`Manage your ${role === 'admin' ? 'administrator' : 'operations'} account and workspace preferences.`} onRefresh={refreshSettings}>
+  return <AppShell role={role} title="Settings" onRefresh={refreshSettings}>
     {notice && <p className={`staff-settings-notice ${noticeKind}`} role="status">{notice}</p>}
     {loading ? <div className="staff-settings-loading">Loading your settings…</div> : <section className="staff-settings-container" aria-label={`${roleLabel(role)} settings`}>
       <div className="staff-settings-tabs" role="tablist" aria-label="Settings sections">

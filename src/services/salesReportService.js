@@ -4,18 +4,20 @@ const FETCH_CAP = 5000
 
 const ORDER_SELECT = `id,order_number,receipt_number,order_type,order_source,status,customer_id,customer_name,
   schedule_date,subtotal,discount_type,discount_amount,delivery_fee,final_total,
-  payment_status,refund_status,is_voided,created_at,
+  payment_status,payment_confirmed,refund_status,is_voided,created_at,
   order_items(menu_item_id,item_name,display_name,quantity,line_total),
   payments(method,status),
   refunds(refund_amount,refund_status,processed_at)`
 
 const PREVIOUS_SELECT = `id,order_type,status,schedule_date,subtotal,discount_amount,delivery_fee,final_total,is_voided,created_at,
+  payment_status,payment_confirmed,
   order_items(quantity),
   payments(method,status),
   refunds(refund_amount,refund_status)`
 
 export const PAYMENT_LABEL = { cash: 'Cash', gcash: 'GCash', bank_transfer: 'Bank Transfer', cod: 'Cash on Delivery', other: 'Other' }
 export const ORDER_TYPE_LABEL = { 'walk-in': 'Dine-in', pickup: 'Takeout', delivery: 'Delivery', preorder: 'Preorder' }
+const PAID_STATES = new Set(['paid', 'verified', 'confirmed'])
 
 function normalizeOrder(row, categoryByMenuItem = {}) {
   const payment = row.payments?.[0] || null
@@ -46,6 +48,8 @@ function normalizeOrder(row, categoryByMenuItem = {}) {
     finalTotal: Number(row.final_total || 0),
     netRevenue: Number(row.final_total || 0) - Number(row.delivery_fee || 0),
     paymentStatus: row.payment_status,
+    paymentRecordStatus: payment?.status || row.payment_status || '',
+    paymentConfirmed: Boolean(row.payment_confirmed),
     paymentMethod: payment?.method || 'other',
     refundStatus: row.refund_status,
     refundedAmount,
@@ -99,9 +103,13 @@ export async function fetchSalesReportData({ dateFrom, dateTo, prevFrom, prevTo 
   }
 }
 
-// An order counts toward revenue when it was not cancelled or voided.
+// A sale is only counted after completion and payment confirmation. This keeps
+// Sales Reports aligned with the settled-sale definition used by Transaction History.
 export function isRevenueOrder(order) {
-  return !order.isCancelled
+  if (order.isVoided || String(order.status || '').toLowerCase() !== 'completed') return false
+  const orderPayment = String(order.paymentStatus || '').toLowerCase()
+  const recordPayment = String(order.paymentRecordStatus || '').toLowerCase()
+  return Boolean(order.paymentConfirmed) || PAID_STATES.has(orderPayment) || PAID_STATES.has(recordPayment)
 }
 
 export function applyLocalFilters(orders, { orderType = 'all', paymentMethod = 'all' } = {}) {
@@ -172,12 +180,17 @@ export function computeSalesReport(orders, previousOrders) {
   const paymentTotals = {}
   orders.filter(isRevenueOrder).forEach((order) => {
     const method = order.paymentMethod || 'other'
-    paymentTotals[method] = (paymentTotals[method] || 0) + order.netRevenue
+    paymentTotals[method] = (paymentTotals[method] || 0) + Math.max(0, order.netRevenue - order.refundedAmount)
   })
 
   const orderTypeCounts = { 'walk-in': 0, pickup: 0, delivery: 0, preorder: 0 }
+  const orderChannelCounts = { 'walk-in': 0, pickup: 0, delivery: 0 }
   orders.filter(isRevenueOrder).forEach((order) => {
     orderTypeCounts[order.typeKey] = (orderTypeCounts[order.typeKey] || 0) + 1
+    const channelKey = ['walk-in', 'pickup', 'delivery'].includes(order.orderType)
+      ? order.orderType
+      : ['walk-in', 'pickup', 'delivery'].includes(order.typeKey) ? order.typeKey : null
+    if (channelKey) orderChannelCounts[channelKey] += 1
   })
 
   const productAgg = new Map()
@@ -190,12 +203,18 @@ export function computeSalesReport(orders, previousOrders) {
     })
   })
   const productRevenue = [...productAgg.values()].reduce((sum, product) => sum + product.revenue, 0)
-  const topProducts = [...productAgg.values()]
+  const productRows = [...productAgg.values()].map((product) => ({
+    ...product,
+    pct: productRevenue > 0 ? (product.revenue / productRevenue) * 100 : 0,
+  }))
+  const topProducts = [...productRows]
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 10)
-    .map((product) => ({ ...product, pct: productRevenue > 0 ? (product.revenue / productRevenue) * 100 : 0 }))
+  const leastOrderedProducts = [...productRows]
+    .sort((a, b) => a.qty - b.qty || a.revenue - b.revenue || a.name.localeCompare(b.name))
+    .slice(0, 10)
 
-  return { summary, previousSummary, comparison, ordersByStatus, paymentTotals, orderTypeCounts, topProducts }
+  return { summary, previousSummary, comparison, ordersByStatus, paymentTotals, orderTypeCounts, orderChannelCounts, topProducts, leastOrderedProducts, productRevenue, productCount: productAgg.size }
 }
 
 // ---- Trend bucketing ------------------------------------------------------
@@ -297,6 +316,135 @@ export function buildTrend(orders, previousOrders, { dateFrom, dateTo, granulari
     index += 1
   }
   return points
+}
+
+function aggregateTrendBuckets(orders, granularity) {
+  const buckets = new Map()
+  orders.filter(isRevenueOrder).forEach((order) => {
+    const key = bucketKey(new Date(order.createdAt), granularity)
+    const entry = buckets.get(key) || { revenue: 0, orders: 0, units: 0 }
+    entry.revenue += Math.max(0, order.netRevenue - order.refundedAmount)
+    entry.orders += 1
+    entry.units += order.itemCount
+    buckets.set(key, entry)
+  })
+  return buckets
+}
+
+function channelKeyForTrend(order) {
+  if (['walk-in', 'pickup', 'delivery'].includes(order.orderType)) return order.orderType
+  if (['walk-in', 'pickup', 'delivery'].includes(order.typeKey)) return order.typeKey
+  return null
+}
+
+// Trend-only series with revenue, order, and unit metrics. The existing
+// buildTrend function remains unchanged for the Sales Reports view.
+export function buildTrendMetrics(orders, previousOrders, { dateFrom, dateTo, granularity = 'day' }) {
+  const from = dateFrom ? new Date(dateFrom) : (orders.length ? new Date(orders[0].createdAt) : new Date())
+  const to = dateTo ? new Date(dateTo) : new Date()
+  const currentBuckets = aggregateTrendBuckets(orders, granularity)
+  const previousBuckets = aggregateTrendBuckets(previousOrders, granularity)
+  const previousKeys = [...previousBuckets.keys()].sort()
+  const previousSeries = []
+
+  if (previousKeys.length) {
+    let previousCursor = new Date(`${previousKeys[0]}T00:00:00`)
+    const lastPreviousKey = previousKeys[previousKeys.length - 1]
+    let guard = 0
+    while (isoDay(previousCursor) <= lastPreviousKey && guard < MAX_TREND_BUCKETS) {
+      previousSeries.push(previousBuckets.get(bucketKey(previousCursor, granularity)) || { revenue: 0, orders: 0, units: 0 })
+      previousCursor = nextBucket(previousCursor, granularity)
+      guard += 1
+    }
+  }
+
+  const points = []
+  let cursor = granularity === 'week' ? weekStart(from) : granularity === 'month' ? monthStart(from) : new Date(from)
+  cursor.setHours(0, 0, 0, 0)
+  let index = 0
+  while (cursor <= to && points.length < MAX_TREND_BUCKETS) {
+    const key = bucketKey(cursor, granularity)
+    const entry = currentBuckets.get(key) || { revenue: 0, orders: 0, units: 0 }
+    const previous = previousSeries[index]
+    points.push({
+      key,
+      label: bucketLabel(key, granularity),
+      revenue: entry.revenue,
+      orders: entry.orders,
+      units: entry.units,
+      previousRevenue: previous ? previous.revenue : null,
+      previousOrders: previous ? previous.orders : null,
+      previousUnits: previous ? previous.units : null,
+    })
+    cursor = nextBucket(cursor, granularity)
+    index += 1
+  }
+  return points
+}
+
+export function buildChannelTrend(orders, { dateFrom, dateTo, granularity = 'day' }) {
+  const from = dateFrom ? new Date(dateFrom) : (orders.length ? new Date(orders[0].createdAt) : new Date())
+  const to = dateTo ? new Date(dateTo) : new Date()
+  const buckets = new Map()
+  orders.filter(isRevenueOrder).forEach((order) => {
+    const channel = channelKeyForTrend(order)
+    if (!channel) return
+    const key = bucketKey(new Date(order.createdAt), granularity)
+    const entry = buckets.get(key) || { delivery: 0, pickup: 0, 'walk-in': 0 }
+    entry[channel] += 1
+    buckets.set(key, entry)
+  })
+
+  const points = []
+  let cursor = granularity === 'week' ? weekStart(from) : granularity === 'month' ? monthStart(from) : new Date(from)
+  cursor.setHours(0, 0, 0, 0)
+  while (cursor <= to && points.length < MAX_TREND_BUCKETS) {
+    const key = bucketKey(cursor, granularity)
+    const entry = buckets.get(key) || { delivery: 0, pickup: 0, 'walk-in': 0 }
+    points.push({ key, label: bucketLabel(key, granularity), ...entry, total: entry.delivery + entry.pickup + entry['walk-in'] })
+    cursor = nextBucket(cursor, granularity)
+  }
+  return points
+}
+
+function aggregateProductsForMomentum(orders) {
+  const products = new Map()
+  orders.filter(isRevenueOrder).forEach((order) => {
+    order.items.forEach((item) => {
+      const entry = products.get(item.name) || { name: item.name, category: item.category, revenue: 0, units: 0 }
+      entry.revenue += item.lineTotal
+      entry.units += item.quantity
+      products.set(item.name, entry)
+    })
+  })
+  return products
+}
+
+export function computeProductMomentum(orders, previousOrders, limit = 8) {
+  const currentProducts = aggregateProductsForMomentum(orders)
+  const previousProducts = aggregateProductsForMomentum(previousOrders)
+  const names = new Set([...currentProducts.keys(), ...previousProducts.keys()])
+  return [...names]
+    .map((name) => {
+      const current = currentProducts.get(name) || { name, category: 'Other', revenue: 0, units: 0 }
+      const previous = previousProducts.get(name) || { name, category: current.category, revenue: 0, units: 0 }
+      const revenueDelta = current.revenue - previous.revenue
+      return {
+        name,
+        category: current.category || previous.category || 'Other',
+        revenue: current.revenue,
+        previousRevenue: previous.revenue,
+        units: current.units,
+        previousUnits: previous.units,
+        revenueDelta,
+        unitsDelta: current.units - previous.units,
+        changePct: changePct(current.revenue, previous.revenue),
+        direction: revenueDelta > 0 ? 'up' : revenueDelta < 0 ? 'down' : 'flat',
+      }
+    })
+    .filter((product) => product.revenue > 0 || product.previousRevenue > 0)
+    .sort((a, b) => Math.abs(b.revenueDelta) - Math.abs(a.revenueDelta) || b.revenue - a.revenue)
+    .slice(0, limit)
 }
 
 // ---- Exports ---------------------------------------------------------------

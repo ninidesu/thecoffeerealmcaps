@@ -58,7 +58,6 @@ export default function UsersAccessPage() {
   return <AppShell
     role="admin"
     title="Users & Access"
-    eyebrow="Manage internal accounts and review changes across every management surface."
     onRefresh={() => setRefreshSignal((value) => value + 1)}
   >
     <WorkspaceTabs />

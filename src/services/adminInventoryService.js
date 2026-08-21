@@ -40,11 +40,17 @@ export async function fetchInventoryItems() {
   ;(recipeLinks || []).forEach((r) => usedByCount.set(r.ingredient_id, (usedByCount.get(r.ingredient_id) || 0) + 1))
 
   const items = [
-    ...(ingredients || []).map((i) => ({
-      ...normalizeItem(i, 'ingredient', Number(i.inventory_stock?.[0]?.quantity ?? 0), Number(i.inventory_stock?.[0]?.min_stock_level ?? 0), Number(i.inventory_stock?.[0]?.high_stock_level ?? 0)),
-      updatedAt: i.inventory_stock?.[0]?.updated_at ?? i.created_at,
-      usedByCount: usedByCount.get(i.id) || 0,
-    })),
+    ...(ingredients || []).map((i) => {
+      // Supabase can return a one-to-one relation as either an array or an
+      // object depending on the relationship metadata. Normalize both forms
+      // so reports and monitoring never calculate different stock statuses.
+      const stock = Array.isArray(i.inventory_stock) ? i.inventory_stock[0] : i.inventory_stock
+      return {
+        ...normalizeItem(i, 'ingredient', Number(stock?.quantity ?? 0), Number(stock?.min_stock_level ?? 0), Number(stock?.high_stock_level ?? 0)),
+        updatedAt: stock?.updated_at ?? i.created_at,
+        usedByCount: usedByCount.get(i.id) || 0,
+      }
+    }),
     ...(finishedProducts || []).map((p) => ({ ...normalizeItem(p, 'finished_product', Number(p.quantity), Number(p.min_stock_level), Number(p.high_stock_level)), usedByCount: p.menu_item_id ? 1 : 0 })),
   ]
   return items

@@ -26,6 +26,7 @@ const adminPageTitles = {
   '/admin/inventory': 'Inventory Monitoring',
   '/admin/transactions': 'Transaction History',
   '/admin/reports': 'Sales',
+  '/admin/analytics': 'Analytics',
   '/admin/inventory-report': 'Inventory Report',
   '/admin/cancellations': 'Cancellation & Refunds',
   '/admin/products': 'Product Performance',
@@ -254,7 +255,7 @@ export default function AdminDashboard() {
   if (pathname === '/admin/inventory') return <AdminInventoryPage />
   if (pathname === '/admin/inventory-report') return <InventoryReportPage />
   if (pathname === '/admin/transactions') return <TransactionsPage />
-  if (pathname === '/admin/reports' || pathname === '/admin/products' || pathname === '/admin/trends') return <SalesReportPage />
+  if (pathname === '/admin/reports' || pathname === '/admin/analytics' || pathname === '/admin/products' || pathname === '/admin/trends') return <SalesReportPage />
   if (pathname === '/admin/cancellations') return <CancellationReportPage />
   if (pathname !== '/admin') return <AppShell role="admin" title={adminPageTitles[pathname] || 'Dashboard'} />
   return <AdminDashboardHome />
@@ -351,7 +352,7 @@ function DashboardContent({ metrics }) {
     </motion.section>
 
     <motion.section className="ad-dashboard-analytics-row" aria-label="Sales and fulfillment overview" variants={itemVariants}>
-      <Panel title="Sales overview" detail="Net sales over the selected period" action={<Link to="/admin/trends">Explore trends <ArrowRight size={15} /></Link>} className="ad-v2-sales-panel">
+      <Panel title="Sales overview" detail="Net sales over the selected period" action={<Link to="/admin/analytics">Explore analytics <ArrowRight size={15} /></Link>} className="ad-v2-sales-panel">
         <SalesLineChart points={metrics.salesTrend} comparison={metrics.salesChangePct} />
       </Panel>
       <Panel title="Fulfillment orders" detail="How customers receive their orders" action={<Link to="/admin/transactions">View all orders <ArrowRight size={15} /></Link>} className="ad-status-panel ad-fulfillment-panel" motionVariants={statusCardVariants}>
@@ -368,7 +369,7 @@ function DashboardContent({ metrics }) {
 
     <motion.section className="ad-dashboard-secondary-grid" aria-label="Additional dashboard summaries" variants={itemVariants}>
       <LowStockAlerts items={metrics.lowStockItems} />
-      <Panel title="Top selling items" detail="Last 14 days" action={<Link to="/admin/products">View all <ArrowRight size={14} /></Link>} className="ad-rail-panel ad-rail-sellers">
+      <Panel title="Top selling items" detail="Last 14 days" action={<Link to="/admin/analytics">View all <ArrowRight size={14} /></Link>} className="ad-rail-panel ad-rail-sellers">
         <RankedProducts products={metrics.bestSellers} />
       </Panel>
       <RecentActivity events={metrics.auditEvents} />
