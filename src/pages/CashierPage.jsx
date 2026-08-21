@@ -698,12 +698,14 @@ function POSCart({ cart, onQty, onEdit }) {
           </div>
           <div className="cashier-line-price-actions">
             <strong>{peso(itemLineTotal(item))}</strong>
+            {editable ? <button type="button" className="cashier-edit-line" onClick={() => onEdit(item)}><Pencil size={14} /> Edit</button> : null}
           </div>
         </div>
         <div className="cashier-line-bottom">
-          <span className="cashier-qty-stepper"><button type="button" onClick={() => onQty(item.lineKey, -1)}><Minus size={13} /></button>{item.qty}<button type="button" onClick={() => onQty(item.lineKey, 1)}><Plus size={13} /></button></span>
-          <span className="cashier-line-bottom-actions">
-            {editable ? <button type="button" className="cashier-edit-line" onClick={() => onEdit(item)}><Pencil size={14} /> Edit</button> : null}
+          <span className="cashier-qty-stepper">
+            <button type="button" onClick={() => onQty(item.lineKey, -1)} aria-label={`Decrease ${item.name} quantity`}><Minus size={14} /></button>
+            <strong className="cashier-qty-value" aria-label={`Quantity ${item.qty}`}>{item.qty}</strong>
+            <button type="button" onClick={() => onQty(item.lineKey, 1)} aria-label={`Increase ${item.name} quantity`}><Plus size={14} /></button>
           </span>
         </div>
       </div>

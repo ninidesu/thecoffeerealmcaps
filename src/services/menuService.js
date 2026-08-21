@@ -14,7 +14,7 @@ const parseVariants=(row,category)=>{
  if(row.slug==='bestseller-box')return [{id:'box3',name:'Box of 3',price:365,priceAdjustment:0},{id:'box6',name:'Box of 6',price:750,priceAdjustment:385}]
  return []
 }
-const temperatures=type=>type==='flexible'?['Hot','Cold']:type==='hot_only'?['Hot only']:type==='iced_only'?['Cold only']:[]
+const temperatures=type=>type==='flexible'?['Hot','Cold']:type==='hot_only'?['Hot']:type==='iced_only'?['Cold']:[]
 const normalizeAddon=row=>({id:row.id,name:row.name,price:Number(row.price),appliesTo:row.applies_to||'both',targetTemperature:row.target_temperature||'both'})
 
 export async function fetchMenuCatalog(){

@@ -93,6 +93,7 @@ export function computeDashboardMetrics(raw) {
   const totalOrders = countedToday.length
   const completedOrders = todayOrders.filter((o) => o.status === 'Completed').length
   const cancelledOrders = todayOrders.filter((o) => o.status === 'Cancelled').length
+  const voidedOrders = todayOrders.filter((o) => o.is_voided).length
   const paidCompletedToday = todayOrders.filter(isPaidCompleted)
   const avgOrderValue = paidCompletedToday.length ? totalSales / paidCompletedToday.length : 0
   const completionRate = totalOrders ? (completedOrders / totalOrders) * 100 : 0
@@ -116,14 +117,27 @@ export function computeDashboardMetrics(raw) {
   const stockBlockedMenuItems = menuItems.filter((m) => ['missing_ingredient', 'insufficient_stock'].includes(m.unavailable_reason)).length
 
   const salesByDay = new Map()
+  const ordersByDay = new Map()
+  const paidOrdersByDay = new Map()
+  orders.filter(isCounted).forEach((o) => {
+    const day = isoDay(new Date(o.created_at))
+    ordersByDay.set(day, (ordersByDay.get(day) || 0) + 1)
+  })
   orders.filter(isPaidCompleted).forEach((o) => {
     const day = isoDay(new Date(o.created_at))
     salesByDay.set(day, (salesByDay.get(day) || 0) + Number(o.final_total || 0))
+    paidOrdersByDay.set(day, (paidOrdersByDay.get(day) || 0) + 1)
   })
   const salesTrend = []
+  const ordersTrend = []
+  const averageOrderTrend = []
   for (let i = 13; i >= 0; i -= 1) {
     const day = isoDay(dayStart(-i))
-    salesTrend.push({ day, total: salesByDay.get(day) || 0 })
+    const sales = salesByDay.get(day) || 0
+    const paidOrders = paidOrdersByDay.get(day) || 0
+    salesTrend.push({ day, total: sales })
+    ordersTrend.push({ day, total: ordersByDay.get(day) || 0 })
+    averageOrderTrend.push({ day, total: paidOrders ? sales / paidOrders : 0 })
   }
 
   const fulfillmentCounts = { delivery: 0, pickup: 0, 'walk-in': 0 }
@@ -196,9 +210,9 @@ export function computeDashboardMetrics(raw) {
   return {
     totalSales, salesChangePct, totalOrders, avgOrderValue, completionRate,
     totalCustomers,
-    completedOrders, cancelledOrders, refundedOrders, refundedAmount,
+    completedOrders, cancelledOrders, voidedOrders, refundedOrders, refundedAmount,
     lowStockItems, outOfStockItems, expiringItems, unavailableMenuItems, stockBlockedMenuItems,
-    salesTrend, fulfillmentCounts, paymentTotals, paymentUsage, bestSellers, recentOrders, newCustomers, returningCustomers,
+    salesTrend, ordersTrend, averageOrderTrend, fulfillmentCounts, paymentTotals, paymentUsage, bestSellers, recentOrders, newCustomers, returningCustomers,
     attentionOrders, orderStageCounts, pendingRefunds, pendingRefundAmount,
     awaitingMessages, messagesToday, auditEvents, criticalAuditEvents,
     storeStatus: orderingConfig.storeStatus || 'open',

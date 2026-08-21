@@ -1,8 +1,9 @@
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3,
-  Coffee, CreditCard, Mail, PackageCheck, PackageX, ReceiptText, RefreshCw, RotateCcw,
-  ShoppingBag, TrendingDown, TrendingUp, Truck, UserRoundCheck, UsersRound, WalletCards,
+  Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3,
+  Coffee, Mail, PackageCheck, PackageX, ReceiptText, RefreshCw,
+  ShoppingBag, Store, TrendingDown, TrendingUp, Users, WalletCards,
 } from 'lucide-react'
+import { animate, motion, MotionConfig, useMotionValue, useReducedMotion, useTransform } from 'framer-motion'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useLocation } from 'react-router-dom'
 import AppShell from '../components/AppShell'
@@ -14,6 +15,7 @@ import InventoryReportPage from './InventoryReportPage'
 import TransactionsPage from './TransactionsPage'
 import SalesReportPage from './SalesReportPage'
 import CancellationReportPage from './CancellationReportPage'
+import StaffSettingsPage from './StaffSettingsPage'
 import { computeDashboardMetrics, fetchDashboardData } from '../services/adminDashboardService'
 import { describeError } from '../utils/describeError'
 import { money } from '../utils/money'
@@ -35,17 +37,128 @@ const adminPageTitles = {
   '/admin/preferences': 'Settings',
 }
 
-const stageMeta = [
-  ['pending', 'Needs review', Clock3, '#d6a34d'],
-  ['preparing', 'Preparing', Coffee, '#5887a0'],
-  ['ready', 'Ready for pickup', PackageCheck, '#4d8c68'],
-  ['delivery', 'Out for delivery', Truck, '#397f7b'],
-  ['completed', 'Completed', CheckCircle2, '#8a9690'],
-]
-
 const paymentLabels = { gcash: 'GCash', bank_transfer: 'Bank transfer', cod: 'Cash / COD', cash: 'Cash', other: 'Other' }
 const fulfillmentLabels = { delivery: 'Delivery', pickup: 'Pickup', 'walk-in': 'Walk-in' }
+const defaultSalesRangeDays = 14
+const cardPopDuration = 0.45
+const numberCountDuration = 3
+const kpiGraphDuration = 4
+const salesGraphDuration = kpiGraphDuration
+const statusChartDuration = 1.15
+const fulfillmentMeta = [
+  { key: 'delivery', label: 'Delivery' },
+  { key: 'pickup', label: 'Pick Up' },
+  { key: 'walk-in', label: 'Walk-In' },
+]
+const containerVariants = {
+  hidden: { opacity: 1 },
+  visible: {
+    opacity: 1,
+    transition: {
+      delayChildren: 0,
+      staggerChildren: 0.04,
+    },
+  },
+}
+const itemVariants = {
+  hidden: { opacity: 1, y: 8 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.6, ease: [0.16, 1, 0.3, 1] },
+  },
+}
+const cardItemVariants = {
+  hidden: { opacity: 1, y: 8 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: cardPopDuration, ease: [0.16, 1, 0.3, 1] },
+  },
+}
+const statusCardVariants = {
+  hidden: { opacity: 1, y: 8 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: cardPopDuration, ease: [0.16, 1, 0.3, 1] },
+  },
+}
+const microContainerVariants = {
+  hidden: {},
+  visible: {
+    transition: {
+      delayChildren: 0.04,
+      staggerChildren: 0.045,
+    },
+  },
+}
+const microItemVariants = {
+  hidden: { opacity: 0, y: 8 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] },
+  },
+}
+const simpleDashboardPanelVariants = {
+  hidden: { opacity: 0, y: 12 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.5,
+      ease: [0.16, 1, 0.3, 1],
+      delayChildren: 0.1,
+      staggerChildren: 0.055,
+    },
+  },
+}
+const transactionRowsVariants = {
+  hidden: {},
+  visible: { transition: { delayChildren: 0.12, staggerChildren: 0.055 } },
+}
+const transactionRowVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0.28, ease: 'easeOut' } },
+}
+const sparkAreaVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: kpiGraphDuration * 0.8, delay: 0.15 } },
+}
+const sparkLineVariants = {
+  hidden: { pathLength: 0, opacity: 0 },
+  visible: { pathLength: 1, opacity: 1, transition: { duration: kpiGraphDuration, ease: [0.16, 1, 0.3, 1] } },
+}
+const sparkDotVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0.35, delay: kpiGraphDuration - 0.35 } },
+}
+const statusSegmentVariants = {
+  hidden: ({ offset, circumference }) => ({
+    opacity: 0,
+    strokeDasharray: `0 ${circumference}`,
+    strokeDashoffset: -offset,
+  }),
+  visible: ({ offset, dash, circumference, index }) => ({
+    opacity: 1,
+    strokeDasharray: `${dash} ${Math.max(0, circumference - dash)}`,
+    strokeDashoffset: -offset,
+    transition: {
+      opacity: { duration: 0.2, delay: index * 0.08 },
+      strokeDasharray: { duration: statusChartDuration, delay: index * 0.08, ease: [0.16, 1, 0.3, 1] },
+    },
+  }),
+}
+const MotionLink = motion(Link)
 
+function formatCount(value) {
+  return Math.round(value).toLocaleString('en-PH')
+}
+
+function formatPercentValue(value) {
+  return `${Math.round(value)}%`
+}
 function percentage(value) {
   if (!Number.isFinite(value)) return '0%'
   return `${Math.abs(value).toFixed(1)}%`
@@ -53,10 +166,6 @@ function percentage(value) {
 
 function formatShortDate(value) {
   return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric' }).format(new Date(value))
-}
-
-function formatDashboardDate() {
-  return new Intl.DateTimeFormat('en-PH', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
 }
 
 function timeAgo(value) {
@@ -67,6 +176,72 @@ function timeAgo(value) {
   return formatShortDate(value)
 }
 
+function formatTime(value) {
+  return new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+}
+
+function chartAxisCurrency(value) {
+  if (value >= 1000) return `₱${(value / 1000).toFixed(value % 1000 ? 1 : 0)}k`
+  return `₱${Math.round(value).toLocaleString('en-PH')}`
+}
+
+function chartAxisStep(value) {
+  if (value <= 4) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(value / 4))
+  const normalized = (value / 4) / magnitude
+  const factor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+  return factor * magnitude
+}
+
+function chartEaseTimelinePosition(progress) {
+  const easedProgress = Math.min(1, Math.max(0, progress))
+  const parameter = 1 - Math.cbrt(1 - easedProgress)
+  const inverse = 1 - parameter
+  return 3 * inverse ** 2 * parameter * 0.16 + 3 * inverse * parameter ** 2 * 0.3 + parameter ** 3
+}
+
+function smoothSparklineGeometry(points, x, y) {
+  if (points.length < 2) return { path: `M ${x(0)} ${y(points[0])}`, pointProgress: [0] }
+  let path = `M ${x(0)} ${y(points[0])}`
+  const cumulativeLengths = [0]
+  let totalLength = 0
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const previous = Math.max(0, index - 1)
+    const next = Math.min(points.length - 1, index + 2)
+    const currentX = x(index)
+    const nextX = x(index + 1)
+    const controlOneX = currentX + (nextX - x(previous)) / 6
+    const segmentTop = Math.min(y(points[index]), y(points[index + 1]))
+    const segmentBottom = Math.max(y(points[index]), y(points[index + 1]))
+    const rawControlOneY = y(points[index]) + (y(points[index + 1]) - y(points[previous])) / 6
+    const controlOneY = Math.min(segmentBottom, Math.max(segmentTop, rawControlOneY))
+    const controlTwoX = nextX - (x(next) - currentX) / 6
+    const rawControlTwoY = y(points[index + 1]) - (y(points[next]) - y(points[index])) / 6
+    const controlTwoY = Math.min(segmentBottom, Math.max(segmentTop, rawControlTwoY))
+    path += ` C ${controlOneX} ${controlOneY}, ${controlTwoX} ${controlTwoY}, ${nextX} ${y(points[index + 1])}`
+    let previousX = currentX
+    let previousY = y(points[index])
+    for (let sample = 1; sample <= 16; sample += 1) {
+      const time = sample / 16
+      const inverse = 1 - time
+      const sampleX = inverse ** 3 * currentX + 3 * inverse ** 2 * time * controlOneX + 3 * inverse * time ** 2 * controlTwoX + time ** 3 * nextX
+      const sampleY = inverse ** 3 * y(points[index]) + 3 * inverse ** 2 * time * controlOneY + 3 * inverse * time ** 2 * controlTwoY + time ** 3 * y(points[index + 1])
+      totalLength += Math.hypot(sampleX - previousX, sampleY - previousY)
+      previousX = sampleX
+      previousY = sampleY
+    }
+    cumulativeLengths.push(totalLength)
+  }
+  return {
+    path,
+    pointProgress: cumulativeLengths.map((length) => totalLength ? length / totalLength : 0),
+  }
+}
+
+function smoothSparklinePath(points, x, y) {
+  return smoothSparklineGeometry(points, x, y).path
+}
+
 export default function AdminDashboard() {
   const { pathname } = useLocation()
   if (pathname === '/admin/team') return <Navigate to="/admin/users-access/users" replace />
@@ -75,6 +250,7 @@ export default function AdminDashboard() {
   if (pathname.startsWith('/admin/users-access/')) return <UsersAccessPage />
   if (pathname === '/admin/content') return <ContentManagementPage />
   if (pathname === '/admin/settings') return <SystemSettingsPage />
+  if (pathname === '/admin/preferences') return <StaffSettingsPage role="admin" />
   if (pathname === '/admin/inventory') return <AdminInventoryPage />
   if (pathname === '/admin/inventory-report') return <InventoryReportPage />
   if (pathname === '/admin/transactions') return <TransactionsPage />
@@ -122,7 +298,7 @@ function AdminDashboardHome() {
   return <AppShell
     role="admin"
     title="Dashboard"
-    eyebrow="Business health, live operations, and the work that needs attention."
+    eyebrow="Real-time overview of your store performance and operations."
     onRefresh={load}
     notificationCount={attentionCount}
     titleActions={<div className="ad-live-state"><i />Live monitoring{lastUpdated && <span>Updated {timeAgo(lastUpdated)}</span>}</div>}
@@ -134,233 +310,266 @@ function AdminDashboardHome() {
 
 function DashboardContent({ metrics }) {
   const actionCards = [
-    { label: 'Orders to review', value: metrics.attentionOrders.length, detail: 'Payment or cancellation hold', icon: Clock3, tone: 'amber', to: '/staff' },
-    { label: 'Pending refunds', value: metrics.pendingRefunds.length, detail: money(metrics.pendingRefundAmount), icon: RotateCcw, tone: 'rose', to: '/admin/cancellations' },
-    { label: 'Stock at risk', value: metrics.lowStockItems.length, detail: `${metrics.outOfStockItems.length} out of stock`, icon: PackageX, tone: 'rose', to: '/admin/inventory' },
-    { label: 'Awaiting reply', value: metrics.awaitingMessages.length, detail: `${metrics.messagesToday} received today`, icon: Mail, tone: 'blue', to: '/staff/messages' },
+    { label: 'Low Stock Items', value: metrics.lowStockItems.length, detail: `${metrics.lowStockItems.length} items running low`, icon: PackageX, tone: 'rose', to: '/admin/inventory' },
+    { label: 'Pending Issues', value: metrics.attentionOrders.length + metrics.pendingRefunds.length, detail: `${metrics.attentionOrders.length + metrics.pendingRefunds.length} items need review`, icon: Clock3, tone: 'amber', to: '/admin/cancellations' },
+    { label: 'Open Items', value: metrics.awaitingMessages.length, detail: `${metrics.awaitingMessages.length} items in queue`, icon: Mail, tone: 'blue', to: '/staff/messages' },
   ]
 
   const quickLinks = [
-    { label: 'Transactions', icon: ReceiptText, to: '/admin/transactions' },
-    { label: 'Sales report', icon: CircleDollarSign, to: '/admin/reports' },
-    { label: 'Inventory', icon: PackageCheck, to: '/admin/inventory' },
+    { label: 'Transactions', detail: 'View all transactions', icon: ReceiptText, to: '/admin/transactions' },
+    { label: 'Sales Report', detail: 'View sales performance', icon: CircleDollarSign, to: '/admin/reports' },
+    { label: 'Inventory', detail: 'Check inventory levels', icon: PackageCheck, to: '/admin/inventory' },
   ]
 
-  return <div className="ad-dashboard ad-dashboard-v2 dash-fade-in">
-    <section className="ad-command-center" aria-labelledby="dashboard-overview-heading">
-      <div className="ad-command-copy">
-        <span className="ad-command-kicker"><i />{formatDashboardDate()}</span>
-        <h2 id="dashboard-overview-heading">Store operations at a glance</h2>
-        <p>Track sales, orders, inventory, and customer activity from one clear workspace.</p>
+  return <MotionConfig reducedMotion="user">
+  <motion.div className="ad-dashboard ad-dashboard-v2 dash-fade-in" variants={containerVariants} initial="hidden" animate="visible">
+    <motion.section className="ad-welcome-section" aria-labelledby="welcome-heading" variants={itemVariants}>
+      <div className="ad-welcome-card">
+        <span className="ad-welcome-icon" aria-hidden="true"><Store size={28} /></span>
+        <div className="ad-welcome-copy">
+          <span className="ad-welcome-kicker">Store operations</span>
+          <h2 id="welcome-heading">Welcome back, Admin!</h2>
+          <p>Keep today’s sales and operations moving from one place.</p>
+        </div>
+        <motion.nav className="ad-quick-nav" aria-label="Dashboard shortcuts" variants={microContainerVariants}>
+          {quickLinks.map(({ label, detail, icon: Icon, to }) => <MotionLink to={to} key={label} variants={microItemVariants}>
+            <span className="ad-quick-icon" aria-hidden="true"><Icon size={19} /></span>
+            <span className="ad-quick-copy"><b>{label}</b><small>{detail}</small></span>
+            <ArrowRight size={13} aria-hidden="true" />
+          </MotionLink>)}
+        </motion.nav>
       </div>
-      <div className="ad-command-side">
-        <div className={`ad-store-state is-${metrics.storeStatus}`}><i /><b>{metrics.storeStatus === 'closed' ? 'Online ordering paused' : 'Store operations live'}</b></div>
-        <nav className="ad-quick-nav" aria-label="Dashboard shortcuts">
-          {quickLinks.map(({ label, icon: Icon, to }) => <Link to={to} key={label}><Icon size={17} /><span>{label}</span></Link>)}
-        </nav>
-      </div>
-    </section>
+    </motion.section>
 
-    <section className="ad-section ad-overview-section" aria-labelledby="today-heading">
-      <SectionHeading id="today-heading" title="Today's overview" detail="Revenue uses paid, completed sales." action={<Link to="/admin/reports">View full report <ArrowRight size={15} /></Link>} />
-      <div className="ad-kpi-grid">
-        <KpiCard icon={CircleDollarSign} label="Net sales" value={money(metrics.totalSales)} comparison={metrics.salesChangePct} detail="vs yesterday" tone="green" />
-        <KpiCard icon={ShoppingBag} label="Orders" value={metrics.totalOrders.toLocaleString()} detail={`${metrics.completedOrders} completed`} tone="cream" />
-        <KpiCard icon={WalletCards} label="Average order" value={money(metrics.avgOrderValue)} detail="Paid completed orders" tone="blue" />
-        <KpiCard icon={CheckCircle2} label="Completion rate" value={`${metrics.completionRate.toFixed(0)}%`} detail={`${metrics.cancelledOrders} cancelled today`} tone="rose" />
-        <KpiCard icon={UsersRound} label="Customers" value={metrics.totalCustomers.toLocaleString()} detail={`${metrics.newCustomers + metrics.returningCustomers} active today`} tone="green" />
-      </div>
-    </section>
+    <motion.section className="ad-kpi-section" aria-labelledby="today-heading" variants={itemVariants}>
+      <h2 className="sr-only" id="today-heading">Today's overview</h2>
+      <motion.div className="ad-kpi-grid ad-reference-kpis" variants={microContainerVariants}>
+        <KpiCard icon={CircleDollarSign} label="Net sales" value={metrics.totalSales} valueFormat={money} comparison={metrics.salesChangePct} detail="vs yesterday" tone="green" trend={metrics.salesTrend} trendLabel="Net sales trend for the last 14 days" />
+        <KpiCard icon={ShoppingBag} label="Orders" value={metrics.totalOrders} valueFormat={formatCount} detail={`${metrics.completedOrders} completed`} tone="cream" trend={metrics.ordersTrend} trendLabel="Orders trend for the last 14 days" />
+        <KpiCard icon={WalletCards} label="Average order" value={metrics.avgOrderValue} valueFormat={money} detail="Paid completed orders" tone="blue" trend={metrics.averageOrderTrend} trendLabel="Average order trend for the last 14 days" />
+      </motion.div>
+    </motion.section>
 
-    <section className="ad-v2-grid ad-v2-grid-main" aria-label="Sales and attention overview">
-      <Panel title="Sales momentum" detail="Net sales over the last 14 days" action={<Link to="/admin/trends">Explore trends <ArrowRight size={15} /></Link>} className="ad-v2-sales-panel">
-        <SalesLineChart points={metrics.salesTrend} />
+    <motion.section className="ad-dashboard-analytics-row" aria-label="Sales and fulfillment overview" variants={itemVariants}>
+      <Panel title="Sales overview" detail="Net sales over the selected period" action={<Link to="/admin/trends">Explore trends <ArrowRight size={15} /></Link>} className="ad-v2-sales-panel">
+        <SalesLineChart points={metrics.salesTrend} comparison={metrics.salesChangePct} />
       </Panel>
-
-      <Panel title="Needs attention" detail="Priority work requiring a review" action={<span className="ad-attention-count">{actionCards.reduce((sum, item) => sum + item.value, 0)} open</span>} className="ad-v2-attention-panel">
-        <div className="ad-attention-grid">
-          {actionCards.map((item) => <Link className={`ad-attention-card is-${item.tone}`} to={item.to} key={item.label}>
-            <span className="ad-attention-icon"><item.icon size={18} /></span><span><b>{item.value}</b><strong>{item.label}</strong><small>{item.detail}</small></span><ArrowRight size={15} />
-          </Link>)}
-        </div>
-        <Link className="ad-settings-link" to="/admin/settings">Review system settings <ArrowRight size={15} /></Link>
+      <Panel title="Fulfillment orders" detail="How customers receive their orders" action={<Link to="/admin/transactions">View all orders <ArrowRight size={15} /></Link>} className="ad-status-panel ad-fulfillment-panel" motionVariants={statusCardVariants}>
+        <FulfillmentOrdersChart counts={metrics.fulfillmentCounts} />
       </Panel>
-    </section>
+    </motion.section>
 
-    <section className="ad-v2-grid ad-v2-grid-wide" aria-label="Orders and payments">
-      <Panel title="Live order flow" detail="Today's orders by operational stage" action={<Link to="/staff">Open preparation <ArrowRight size={15} /></Link>} className="ad-operations-panel">
-        <OrderFlowChart counts={metrics.orderStageCounts} />
-        <div className="ad-order-list">
-          <div className="ad-list-head"><span>Recent orders</span><span>Status</span></div>
-          {metrics.recentOrders.slice(0, 5).map((order) => <div className="ad-order-row" key={order.id}>
-            <span><b>{order.order_number}</b><small>{order.customer_name || 'Walk-in customer'} - {fulfillmentLabels[order.order_type] || order.order_type}</small></span>
-            <span className={`ad-order-status is-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{order.status}</span>
-          </div>)}
-          {!metrics.recentOrders.length && <EmptyState icon={ReceiptText} text="No orders have been recorded today." />}
-        </div>
-      </Panel>
+    <motion.section className="ad-dashboard-operations-row" aria-label="Today's performance and items needing attention" variants={itemVariants}>
+      <PerformanceSnapshot metrics={metrics} />
+      <OperationalQueue items={actionCards} />
+    </motion.section>
 
-      <Panel title="Payment mix" detail="Today's completed payments by usage">
-        <BreakdownDonut data={metrics.paymentUsage} labels={paymentLabels} colors={['#147d57', '#d1a44f', '#5f86a0', '#9a7564']} />
-      </Panel>
-    </section>
+    <RecentTransactions orders={metrics.recentOrders} />
 
-    <section className="ad-v2-grid ad-v2-grid-wide" aria-label="Inventory and product performance">
-      <Panel title="Inventory risk" detail="Low and out-of-stock items ranked by urgency" action={<Link to="/admin/inventory">Monitor inventory <ArrowRight size={15} /></Link>}>
-        <div className="ad-inventory-summary">
-          <div className="is-danger"><PackageX size={18} /><span><b>{metrics.outOfStockItems.length}</b><small>Out of stock</small></span></div>
-          <div className="is-warning"><AlertTriangle size={18} /><span><b>{Math.max(0, metrics.lowStockItems.length - metrics.outOfStockItems.length)}</b><small>Low stock</small></span></div>
-          <div className="is-info"><Clock3 size={18} /><span><b>{metrics.expiringItems.length}</b><small>Expiring soon</small></span></div>
-        </div>
-        <div className="ad-stock-list">
-          {metrics.lowStockItems.slice(0, 5).map((item) => {
-            const ratio = item.min > 0 ? Math.min(100, Math.max(0, (item.quantity / item.min) * 100)) : 100
-            return <div className="ad-stock-row" key={item.id}><span><b>{item.name}</b><small>{item.quantity} {item.unit} on hand - alert at {item.min}</small></span><div><i style={{ width: `${ratio}%` }} /></div><strong>{item.healthy > item.quantity ? `+${Math.ceil(item.healthy - item.quantity)}` : 'Review'}</strong></div>
-          })}
-          {!metrics.lowStockItems.length && <EmptyState icon={PackageCheck} text="Inventory levels are healthy." />}
-        </div>
-      </Panel>
-
-      <Panel title="Best sellers" detail="Top products by quantity sold in the last 14 days" action={<Link to="/admin/products">Product report <ArrowRight size={15} /></Link>}>
+    <motion.section className="ad-dashboard-secondary-grid" aria-label="Additional dashboard summaries" variants={itemVariants}>
+      <LowStockAlerts items={metrics.lowStockItems} />
+      <Panel title="Top selling items" detail="Last 14 days" action={<Link to="/admin/products">View all <ArrowRight size={14} /></Link>} className="ad-rail-panel ad-rail-sellers">
         <RankedProducts products={metrics.bestSellers} />
       </Panel>
-    </section>
-
-    <section className="ad-v2-grid ad-v2-grid-even" aria-label="Customer and administration activity">
-      <Panel title="Customer activity" detail="Today's customer mix and inbox workload" action={<Link to="/staff/messages">Open inbox <ArrowRight size={15} /></Link>}>
-        <CustomerMixChart newCustomers={metrics.newCustomers} returningCustomers={metrics.returningCustomers} />
-        <div className="ad-customer-stats">
-          <div><UsersRound size={17} /><span><b>{metrics.totalCustomers.toLocaleString()}</b><small>Registered customers</small></span></div>
-          <div><Mail size={17} /><span><b>{metrics.awaitingMessages.length}</b><small>Awaiting a reply</small></span></div>
-          <div><TrendingUp size={17} /><span><b>{(metrics.newCustomers + metrics.returningCustomers) ? `${Math.round((metrics.returningCustomers / (metrics.newCustomers + metrics.returningCustomers)) * 100)}%` : '0%'}</b><small>Returning rate</small></span></div>
-        </div>
-        <div className="ad-message-list">
-          {metrics.awaitingMessages.slice(0, 3).map((message) => <Link to="/staff/messages" key={message.id}><i /><span><b>{message.subject}</b><small>{message.customer_name} - {timeAgo(message.created_at)}</small></span></Link>)}
-          {!metrics.awaitingMessages.length && <EmptyState icon={CheckCircle2} text="No customer messages are waiting." />}
-        </div>
-      </Panel>
-
-      <Panel title="Store activity" detail="Order channels and recent administrative changes" action={<Link to="/admin/users-access/activity">View audit trail <ArrowRight size={15} /></Link>}>
-        <div className="ad-v2-subsection"><span>Order channels</span><small>Today's non-cancelled orders</small></div>
-        <HorizontalBreakdown data={metrics.fulfillmentCounts} labels={fulfillmentLabels} />
-        <div className="ad-v2-subsection ad-v2-subsection-divided"><span>Administration activity</span><small>Latest management changes</small></div>
-        <div className="ad-activity-list">
-          {metrics.auditEvents.slice(0, 4).map((event) => <div key={event.id}><i className={`is-${event.severity || event.result}`} /><span><b>{event.summary}</b><small>{event.actor_name_snapshot || 'System'} - {timeAgo(event.occurred_at)}</small></span><em>{event.module?.replaceAll('_', ' ')}</em></div>)}
-          {!metrics.auditEvents.length && <EmptyState icon={UserRoundCheck} text="No recent administrative activity." />}
-        </div>
-      </Panel>
-    </section>
-  </div>
+      <RecentActivity events={metrics.auditEvents} />
+    </motion.section>
+  </motion.div>
+  </MotionConfig>
 }
 
-function SectionHeading({ id, title, detail, action }) {
-  return <div className="ad-section-heading"><div><h2 id={id}>{title}</h2><p>{detail}</p></div>{action}</div>
+function PerformanceSnapshot({ metrics }) {
+  const up = metrics.salesChangePct >= 0
+  const customersToday = metrics.newCustomers + metrics.returningCustomers
+  return <Panel title="Today's Performance" detail="Live store health" className="ad-rail-panel ad-performance-panel" motionVariants={simpleDashboardPanelVariants}>
+    <motion.div className="ad-performance-value" variants={microItemVariants}><span className="ad-performance-label is-green"><CircleDollarSign size={12} />Net sales</span><strong><AnimatedMetric value={metrics.totalSales} format={money} /></strong><small className={up ? 'is-up' : 'is-down'}>{up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}{percentage(metrics.salesChangePct)} <em>vs yesterday</em></small></motion.div>
+    <motion.div className="ad-performance-grid" variants={microContainerVariants}>
+      <motion.span variants={microItemVariants}><span className="ad-performance-label is-amber"><ShoppingBag size={12} />Orders today</span><b><AnimatedMetric value={metrics.totalOrders} format={formatCount} /></b><small>{metrics.completedOrders} completed</small></motion.span>
+      <motion.span variants={microItemVariants}><span className="ad-performance-label is-green"><CheckCircle2 size={12} />Completion</span><b><AnimatedMetric value={metrics.completionRate} format={formatPercentValue} /></b><small>{metrics.completedOrders} completed</small></motion.span>
+      <motion.span variants={microItemVariants}><span className="ad-performance-label is-blue"><Users size={12} />Active customers</span><b><AnimatedMetric value={customersToday} format={formatCount} /></b><small>New + {metrics.returningCustomers}</small></motion.span>
+      <motion.span variants={microItemVariants}><span className="ad-performance-label is-blue"><WalletCards size={12} />Average order</span><b><AnimatedMetric value={metrics.avgOrderValue} format={money} /></b><small>Paid completed orders</small></motion.span>
+    </motion.div>
+    <motion.div className={`ad-performance-store is-${metrics.storeStatus}`} variants={microItemVariants}><span><span className="ad-performance-label is-green"><Store size={12} />Store status</span><b>{metrics.storeStatus === 'closed' ? 'Paused' : 'Open'}</b><small>{metrics.storeStatus === 'closed' ? 'Ordering paused' : 'Accepting orders'}</small></span></motion.div>
+  </Panel>
 }
 
-function Panel({ title, detail, action, className = '', children }) {
-  return <article className={`ad-panel ${className}`}><header><div><h2>{title}</h2><p>{detail}</p></div>{action}</header><div className="ad-panel-body">{children}</div></article>
+function OperationalQueue({ items }) {
+  return <Panel title="Needs attention" detail="Priority operational queue" action={<Link to="/admin/transactions">View all <ArrowRight size={14} /></Link>} className="ad-rail-panel ad-queue-panel" motionVariants={simpleDashboardPanelVariants}>
+    <motion.div className="ad-queue-list" variants={microContainerVariants}>{items.map(({ icon: Icon, ...item }) => <MotionLink className={`is-${item.tone}`} to={item.to} key={item.label} variants={microItemVariants}>
+      <span><Icon size={16} /></span><div><b>{item.label}</b><small>{item.detail}</small></div><strong>{item.value}</strong>
+    </MotionLink>)}</motion.div>
+  </Panel>
 }
 
-function KpiCard({ icon: Icon, label, value, comparison, detail, tone }) {
+function LowStockAlerts({ items }) {
+  return <Panel title="Low-stock alerts" detail="Inventory below its alert level" action={<Link to="/admin/inventory">View all <ArrowRight size={14} /></Link>} className="ad-rail-panel ad-low-stock-panel">
+    <motion.div className="ad-low-stock-list" variants={microContainerVariants}>{items.slice(0, 4).map((item) => {
+      const out = item.quantity <= 0
+      return <MotionLink to="/admin/inventory" key={item.id} variants={microItemVariants}><span className={out ? 'is-out' : ''}><PackageX size={16} /></span><div><b>{item.name}</b><small>{item.quantity} {item.unit} left</small></div><em className={out ? 'is-out' : ''}>{out ? 'Out' : 'Low'}</em></MotionLink>
+    })}{!items.length && <EmptyState icon={PackageCheck} text="Inventory levels are healthy." />}</motion.div>
+  </Panel>
+}
+
+function RecentActivity({ events }) {
+  return <Panel title="Recent activity" detail="Latest administrative changes" action={<Link to="/admin/users-access/activity">View all <ArrowRight size={14} /></Link>} className="ad-rail-panel ad-activity-panel">
+    <motion.div className="ad-activity-list" variants={microContainerVariants}>{events.slice(0, 4).map((event) => <motion.div key={event.id} variants={microItemVariants}><i className={`is-${event.severity || event.result}`} /><span><b>{event.summary || 'System activity recorded'}</b><small>{event.actor_name_snapshot || 'System'} - {timeAgo(event.occurred_at)}</small></span><em>{(event.module || 'System').replaceAll('_', ' ')}</em></motion.div>)}{!events.length && <EmptyState icon={Activity} text="No recent administrative activity." />}</motion.div>
+  </Panel>
+}
+
+function RecentTransactions({ orders }) {
+  return <Panel title="Recent Transactions" detail="Latest orders across supported sales channels" action={<Link to="/admin/transactions">View all transactions <ArrowRight size={15} /></Link>} className="ad-transactions-panel" motionVariants={simpleDashboardPanelVariants}>
+    <div className="ad-transactions-scroll">
+      <table className="ad-transactions-table">
+        <thead><tr><th>Transaction</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th>Time</th><th><span className="sr-only">Actions</span></th></tr></thead>
+        <motion.tbody variants={transactionRowsVariants}>{orders.map((order) => {
+          const items = order.order_items || []
+          const itemLabel = items.length ? items.slice(0, 2).map((item) => item.display_name || item.item_name).join(', ') : 'No item details'
+          const statusSlug = order.is_voided ? 'voided' : order.status.toLowerCase().replaceAll(' ', '-')
+          return <motion.tr key={order.id} variants={transactionRowVariants}>
+            <td><b>{order.order_number}</b><small>{fulfillmentLabels[order.order_type] || order.order_type}</small></td>
+            <td>{order.customer_name || 'Walk-in customer'}</td>
+            <td><span title={items.map((item) => item.display_name || item.item_name).join(', ')}>{itemLabel}{items.length > 2 ? ` +${items.length - 2}` : ''}</span></td>
+            <td>{paymentLabels[order.payments?.[0]?.method] || 'Not recorded'}</td>
+            <td><b>{money(order.final_total)}</b></td>
+            <td><span className={`ad-order-status is-${statusSlug}`}>{order.is_voided ? 'Voided' : order.status}</span></td>
+            <td><time dateTime={order.created_at}>{formatTime(order.created_at)}</time></td>
+            <td><Link to="/admin/transactions" aria-label={`View transaction ${order.order_number}`}>View <ArrowRight size={14} /></Link></td>
+          </motion.tr>
+        })}</motion.tbody>
+      </table>
+      {!orders.length && <EmptyState icon={ReceiptText} text="No recent transactions are available." />}
+    </div>
+  </Panel>
+}
+
+function Panel({ title, detail, action, className = '', motionVariants = cardItemVariants, children }) {
+  const PanelElement = motionVariants ? motion.article : 'article'
+  const motionProps = motionVariants ? { variants: motionVariants } : {}
+  return <PanelElement className={`ad-panel ${className}`} {...motionProps}><header><div><h2>{title}</h2><p>{detail}</p></div>{action}</header><div className="ad-panel-body">{children}</div></PanelElement>
+}
+
+function KpiCard({ icon: Icon, label, value, valueFormat = formatCount, comparison, detail, tone, trend, trendLabel }) {
   const up = comparison >= 0
-  return <article className={`ad-kpi-card is-${tone}`}><div className="ad-kpi-top"><span><Icon size={19} /></span><small>{label}</small></div><strong>{value}</strong><footer>{comparison !== undefined && <span className={up ? 'is-up' : 'is-down'}>{up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}{percentage(comparison)}</span>}<small>{detail}</small></footer></article>
+  return <motion.article className={`ad-kpi-card is-${tone}`} variants={cardItemVariants}><div className="ad-kpi-top"><span><Icon size={19} /></span><small>{label}</small></div><strong><AnimatedMetric value={value} format={valueFormat} duration={numberCountDuration} /></strong><footer>{comparison !== undefined && <span className={up ? 'is-up' : 'is-down'}>{up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}{percentage(comparison)}</span>}<small>{detail}</small></footer>{trend?.length > 1 && <MiniTrend values={trend.map((point) => point.total)} tone={tone} label={trendLabel || `${label} trend`} />}</motion.article>
 }
 
-function OrderFlowChart({ counts }) {
-  const total = Math.max(1, stageMeta.reduce((sum, [key]) => sum + (counts[key] || 0), 0))
-  return <div className="ad-flow-chart" role="img" aria-label="Order flow by operational stage">
-    <div className="ad-flow-track">{stageMeta.map(([key, label, Icon, color]) => <span key={key} title={`${label}: ${counts[key] || 0}`} style={{ width: `${((counts[key] || 0) / total) * 100}%`, background: color }} />)}</div>
-    <div className="ad-flow-legend">{stageMeta.map(([key, label, Icon, color]) => <div key={key}><span style={{ color, background: `${color}18` }}><Icon size={16} /></span><b>{counts[key] || 0}</b><small>{label}</small></div>)}</div>
-    {counts.overdue > 0 && <div className="ad-overdue-note"><AlertTriangle size={15} /><b>{counts.overdue} overdue</b><span>Scheduled time has passed</span></div>}
-  </div>
+function AnimatedMetric({ value, format = formatCount, duration = 0.7 }) {
+  const target = Number.isFinite(Number(value)) ? Number(value) : 0
+  const reducedMotion = useReducedMotion()
+  const motionValue = useMotionValue(0)
+  const displayValue = useTransform(motionValue, (latest) => format(latest))
+
+  useEffect(() => {
+    const controls = animate(motionValue, target, {
+      duration: reducedMotion ? 0 : duration,
+      ease: [0.16, 1, 0.3, 1],
+    })
+    return () => controls.stop()
+  }, [duration, motionValue, reducedMotion, target])
+
+  return <motion.span>{displayValue}</motion.span>
 }
 
-function SalesLineChart({ points }) {
-  const [activeIndex, setActiveIndex] = useState(points.length - 1)
-  const width = 760, height = 250, inset = { left: 8, right: 8, top: 18, bottom: 30 }
-  const max = Math.max(1, ...points.map((point) => point.total))
+function MiniTrend({ values = [], tone, label }) {
+  const safeValues = values.filter((value) => Number.isFinite(value))
+  const points = safeValues.length > 1 ? safeValues : [0, 0]
+  const width = 180, height = 64, inset = { left: 3, right: 3, top: 8, bottom: 8 }
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const spread = max - min || Math.max(Math.abs(max) * .2, 1)
+  const floor = min - (spread - (max - min)) / 2
   const x = (index) => inset.left + (index / Math.max(1, points.length - 1)) * (width - inset.left - inset.right)
-  const y = (value) => inset.top + (1 - value / max) * (height - inset.top - inset.bottom)
-  const line = points.map((point, index) => `${index ? 'L' : 'M'} ${x(index)} ${y(point.total)}`).join(' ')
+  const y = (value) => inset.top + (1 - (value - floor) / spread) * (height - inset.top - inset.bottom)
+  const line = smoothSparklinePath(points, x, y)
   const area = `${line} L ${x(points.length - 1)} ${height - inset.bottom} L ${x(0)} ${height - inset.bottom} Z`
-  const active = points[activeIndex]
-  const total = points.reduce((sum, point) => sum + point.total, 0)
-  return <div className="ad-sales-chart">
-    <div className="ad-chart-summary"><span><b>{money(total)}</b><small>14-day net sales</small></span>{active && <span><b>{money(active.total)}</b><small>{formatShortDate(active.day)}</small></span>}</div>
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Fourteen day net sales line chart" preserveAspectRatio="none">
-      <defs><linearGradient id="adSalesArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#147d57" stopOpacity=".28" /><stop offset="1" stopColor="#147d57" stopOpacity="0" /></linearGradient></defs>
-      {[0, .25, .5, .75, 1].map((step) => <line key={step} x1="0" x2={width} y1={inset.top + step * (height - inset.top - inset.bottom)} y2={inset.top + step * (height - inset.top - inset.bottom)} className="ad-chart-gridline" />)}
-      <path d={area} fill="url(#adSalesArea)" />
-      <path d={line} className="ad-sales-line" vectorEffect="non-scaling-stroke" />
-      {points.map((point, index) => <g key={point.day} className={activeIndex === index ? 'is-active' : ''} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)} tabIndex="0" aria-label={`${formatShortDate(point.day)}, ${money(point.total)}`}><circle cx={x(index)} cy={y(point.total)} r={activeIndex === index ? 6 : 3.5} /><rect x={Math.max(0, x(index) - 24)} y="0" width="48" height={height} fill="transparent" /></g>)}
-    </svg>
-    <div className="ad-chart-axis">{points.filter((_, index) => index % 3 === 0 || index === points.length - 1).map((point) => <span key={point.day}>{formatShortDate(point.day)}</span>)}</div>
-  </div>
+  const gradientId = `ad-spark-${tone}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+  return <svg className={`ad-kpi-sparkline is-${tone}`} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} preserveAspectRatio="none">
+    <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="currentColor" stopOpacity=".25" /><stop offset="1" stopColor="currentColor" stopOpacity="0" /></linearGradient></defs>
+    <motion.path className="ad-kpi-spark-area" d={area} fill={`url(#${gradientId})`} variants={sparkAreaVariants} />
+    <motion.path className="ad-kpi-spark-line" d={line} vectorEffect="non-scaling-stroke" variants={sparkLineVariants} />
+    <motion.circle className="ad-kpi-spark-dot" cx={x(points.length - 1)} cy={y(points[points.length - 1])} r="3.5" variants={sparkDotVariants} />
+  </svg>
 }
 
-function BreakdownDonut({ data, labels, colors }) {
-  const entries = Object.entries(data || {}).sort(([, a], [, b]) => b.count - a.count)
-  const [activeKey, setActiveKey] = useState(entries[0]?.[0] || null)
-  const total = entries.reduce((sum, [, value]) => sum + value.count, 0)
-  const totalRevenue = entries.reduce((sum, [, value]) => sum + value.revenue, 0)
-  const selected = entries.find(([key]) => key === activeKey) || entries[0]
-  const circumference = 2 * Math.PI * 55
+function FulfillmentOrdersChart({ counts }) {
+  const entries = fulfillmentMeta.map((item) => ({ ...item, value: counts[item.key] || 0 }))
+  const [activeKey, setActiveKey] = useState(null)
+  const activeEntry = entries.find((item) => item.key === activeKey)
+  const total = entries.reduce((sum, item) => sum + item.value, 0)
+  const circumference = 2 * Math.PI * 54
   let offset = 0
-  if (!entries.length) return <EmptyState icon={CreditCard} text="No completed payments today." />
-  return <div className="ad-donut-wrap">
-    <div className="ad-donut-feature">
-      <div className="ad-donut-visual">
-        <svg viewBox="0 0 160 160" role="img" aria-label="Completed payment methods ranked by number of uses">
-          <circle cx="80" cy="80" r="55" fill="none" stroke="var(--mgmt-subtle)" strokeWidth="20" />
-          {entries.map(([key, value], index) => {
-            const pct = total ? value.count / total : 0
-            const dash = pct * circumference
-            const segment = <circle key={key} cx="80" cy="80" r="55" fill="none" stroke={colors[index % colors.length]} strokeWidth={activeKey === key ? 25 : 20} strokeOpacity={activeKey && activeKey !== key ? .38 : 1} strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} transform="rotate(-90 80 80)" tabIndex="0" onMouseEnter={() => setActiveKey(key)} onFocus={() => setActiveKey(key)}><title>{`${labels[key] || key}: ${value.count} payment${value.count === 1 ? '' : 's'}, ${money(value.revenue)}`}</title></circle>
-            offset += dash
-            return segment
-          })}
-        </svg>
-        <span><b>{selected?.[1].count || 0}</b><small>{selected ? labels[selected[0]] || selected[0] : 'Payments'}</small></span>
-      </div>
-      <div className="ad-donut-leading"><span>Most used today</span><b>{labels[entries[0][0]] || entries[0][0]}</b><small>{entries[0][1].count} of {total} completed payments</small></div>
+  return <motion.div className="ad-status-chart" variants={microContainerVariants}>
+    <div className="ad-status-visual">
+      <svg viewBox="0 0 140 140" role="img" aria-labelledby="ad-fulfillment-title">
+        <title id="ad-fulfillment-title">{`${total} orders today by fulfillment method`}</title>
+        <circle className="ad-status-track" cx="70" cy="70" r="54" fill="none" strokeWidth="18" />
+        <g transform="rotate(-90 70 70)">{entries.map((item, index) => {
+          const dash = total ? (item.value / total) * circumference : 0
+          const segmentOffset = offset
+          const segment = <motion.circle className={`ad-status-segment is-${item.key}${activeKey === item.key ? ' is-active' : ''}${activeKey && activeKey !== item.key ? ' is-muted' : ''}`} key={item.key} cx="70" cy="70" r="54" fill="none" strokeWidth="18" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-segmentOffset} variants={statusSegmentVariants} custom={{ offset: segmentOffset, dash, circumference, index }} tabIndex={item.value ? 0 : -1} aria-label={`${item.label}: ${item.value} order${item.value === 1 ? '' : 's'}`} onMouseEnter={() => setActiveKey(item.key)} onMouseLeave={() => setActiveKey(null)} onFocus={() => setActiveKey(item.key)} onBlur={() => setActiveKey(null)}><title>{`${item.label}: ${item.value}`}</title></motion.circle>
+          offset += dash
+          return segment
+        })}</g>
+      </svg>
+      <span><b>{activeEntry ? formatCount(activeEntry.value) : <AnimatedMetric value={total} />}</b><small>{activeEntry?.label || 'Total orders'}</small></span>
     </div>
-    <div className="ad-donut-legend">
-      <div className="ad-donut-total"><span><b>{total}</b><small>Completed payments</small></span><strong>{money(totalRevenue)}</strong></div>
-      {entries.map(([key, value], index) => {
-        const paymentPercentage = total ? (value.count / total) * 100 : 0
-        return <button type="button" key={key} className={activeKey === key ? 'is-active' : ''} onMouseEnter={() => setActiveKey(key)} onFocus={() => setActiveKey(key)} aria-label={`${labels[key] || key}, ${value.count} payments, ${paymentPercentage.toFixed(0)} percent`}>
-          <i style={{ background: colors[index % colors.length] }} />
-          <span><b>{labels[key] || key}</b><small>{value.count} payment{value.count === 1 ? '' : 's'} - {paymentPercentage.toFixed(0)}%</small><em><i style={{ width: `${paymentPercentage}%`, background: colors[index % colors.length] }} /></em></span>
-          <strong>{money(value.revenue)}</strong>
-        </button>
-      })}
-    </div>
-  </div>
+    <motion.div className="ad-status-legend" variants={microContainerVariants}>{entries.map((item) => { const share = total ? `${((item.value / total) * 100).toFixed(0)}%` : '0%'; return <motion.div className={activeKey === item.key ? 'is-active' : ''} key={item.key} variants={microItemVariants} onMouseEnter={() => setActiveKey(item.key)} onMouseLeave={() => setActiveKey(null)}><i className={`is-${item.key}`} /><span><b>{item.label}</b></span><em>{share}</em><strong>{formatCount(item.value)}</strong></motion.div> })}</motion.div>
+    <motion.div className="ad-status-summary" variants={microContainerVariants}>{entries.map((item) => <motion.span key={item.key} variants={microItemVariants}><b>{formatCount(item.value)}</b><small>{item.label}</small></motion.span>)}</motion.div>
+  </motion.div>
 }
 
-function CustomerMixChart({ newCustomers, returningCustomers }) {
-  const total = newCustomers + returningCustomers
-  const returningPct = total ? (returningCustomers / total) * 100 : 0
-  return <div className="ad-customer-mix">
-    <div className="ad-mix-ring" style={{ '--mix': `${returningPct * 3.6}deg` }} role="img" aria-label={`${total} customers today: ${returningCustomers} returning and ${newCustomers} new`}><span><b>{total}</b><small>Customers today</small></span></div>
-    <div className="ad-mix-breakdown">
-      <span><i className="is-returning" /><b>{returningCustomers}</b><small>Returning - {Math.round(returningPct)}%</small></span>
-      <span><i className="is-new" /><b>{newCustomers}</b><small>New - {Math.round(100 - returningPct)}%</small></span>
-      <p><TrendingUp size={13} /> {returningPct ? `${Math.round(returningPct)}% of today's customers are returning` : 'No returning customers yet today'}</p>
-    </div>
-  </div>
+function SalesLineChart({ points, comparison }) {
+  const reducedMotion = useReducedMotion()
+  const [range, setRange] = useState(defaultSalesRangeDays)
+  const visiblePoints = points.slice(-range)
+  const [activeIndex, setActiveIndex] = useState(null)
+  useEffect(() => setActiveIndex(null), [range, visiblePoints.length])
+  const width = 760, height = 176, inset = { left: 46, right: 30, top: 38, bottom: 22 }
+  const max = Math.max(1, ...visiblePoints.map((point) => point.total))
+  const axisMax = chartAxisStep(max) * 4
+  const plotHeight = height - inset.top - inset.bottom
+  const x = (index) => inset.left + (index / Math.max(1, visiblePoints.length - 1)) * (width - inset.left - inset.right)
+  const y = (value) => inset.top + (1 - value / axisMax) * plotHeight
+  const lineGeometry = smoothSparklineGeometry(visiblePoints.map((point) => point.total), x, y)
+  const line = lineGeometry.path
+  const area = `${line} L ${x(visiblePoints.length - 1)} ${height - inset.bottom} L ${x(0)} ${height - inset.bottom} Z`
+  const active = visiblePoints[activeIndex ?? visiblePoints.length - 1]
+  const total = visiblePoints.reduce((sum, point) => sum + point.total, 0)
+  return <motion.div className="ad-sales-chart" variants={microContainerVariants}>
+    <div className="ad-chart-summary"><span><b><AnimatedMetric value={total} format={money} duration={numberCountDuration} /></b><small>{range}-day net sales <em className={comparison >= 0 ? 'is-up' : 'is-down'}>{comparison >= 0 ? '+' : '-'}{percentage(comparison)} today</em></small></span>{active && <span><motion.b key={active.day} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }}>{money(active.total)}</motion.b><small>{formatShortDate(active.day)}</small></span>}<label><span>Period</span><select value={range} onChange={(event) => setRange(Number(event.target.value))}><option value="7">Last 7 days</option><option value="14">Last 14 days</option></select></label></div>
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${range}-day net sales line chart`} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="adSalesArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--mgmt-primary)" stopOpacity=".28" /><stop offset="1" stopColor="var(--mgmt-primary)" stopOpacity="0" /></linearGradient>
+        <clipPath id="adSalesRevealClip"><rect key={`clip-${range}-${visiblePoints.map((point) => point.total).join('-')}`} className="ad-sales-line-clip" x={inset.left - 6} y="0" width={width - inset.left - inset.right + 12} height={height} style={{ animationDuration: `${salesGraphDuration}s` }} /></clipPath>
+      </defs>
+      {[0, .25, .5, .75, 1].map((step) => <g key={step}><line x1={inset.left} x2={width - inset.right} y1={inset.top + step * plotHeight} y2={inset.top + step * plotHeight} className="ad-chart-gridline" /><text x="0" y={inset.top + step * plotHeight + 3} className="ad-chart-y-label">{chartAxisCurrency(axisMax * (1 - step))}</text></g>)}
+      <path d={area} fill="url(#adSalesArea)" clipPath="url(#adSalesRevealClip)" />
+      <path d={line} className="ad-sales-line" clipPath="url(#adSalesRevealClip)" vectorEffect="non-scaling-stroke" />
+      {visiblePoints.map((point, index) => {
+        const pointX = x(index)
+        const pointY = y(point.total)
+        const tooltipWidth = 104
+        const tooltipHeight = 32
+        const tooltipX = Math.min(width - inset.right - tooltipWidth, Math.max(inset.left, pointX - tooltipWidth / 2))
+        const tooltipY = pointY - tooltipHeight - 10 >= 2 ? pointY - tooltipHeight - 10 : pointY + 10
+        const isActive = activeIndex === index
+        return <g key={`${range}-${point.day}-${point.total}`} className={isActive ? 'is-active' : ''} onMouseEnter={() => setActiveIndex(index)} onMouseLeave={() => setActiveIndex(null)} onFocus={() => setActiveIndex(index)} onBlur={() => setActiveIndex(null)} tabIndex="0" aria-label={`${formatShortDate(point.day)}, ${money(point.total)}`}>
+          <rect className="ad-chart-point-hit-area" x={Math.max(0, pointX - 24)} y="0" width="48" height={height} fill="transparent" />
+          <circle className="ad-sales-point" cx={pointX} cy={pointY} r={isActive ? 6 : 3.5} style={{ animationDelay: `${chartEaseTimelinePosition(index / Math.max(1, visiblePoints.length - 1)) * salesGraphDuration}s` }} />
+          {isActive && <motion.g className="ad-chart-point-tooltip" initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }} aria-hidden="true">
+            <rect x={tooltipX} y={tooltipY} width={tooltipWidth} height={tooltipHeight} rx="7" />
+            <text x={tooltipX + tooltipWidth / 2} y={tooltipY + 13} className="ad-chart-tooltip-value">{money(point.total)}</text>
+            <text x={tooltipX + tooltipWidth / 2} y={tooltipY + 25} className="ad-chart-tooltip-date">{formatShortDate(point.day)}</text>
+          </motion.g>}
+        </g>
+      })}
+    </svg>
+    <div className="ad-chart-axis" aria-label={`${range}-day date axis`}>{visiblePoints.map((point) => <span key={point.day}>{formatShortDate(point.day)}</span>)}</div>
+  </motion.div>
 }
 
 function RankedProducts({ products }) {
   const max = Math.max(1, ...products.map((item) => item.qty))
-  return <div className="ad-ranked-list">{products.length ? products.map((item, index) => <div key={item.name}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.qty} sold - {money(item.revenue)}</small><i><em style={{ width: `${(item.qty / max) * 100}%` }} /></i></div></div>) : <EmptyState icon={Coffee} text="No completed product sales yet." />}</div>
-}
-
-function HorizontalBreakdown({ data, labels }) {
-  const entries = Object.entries(data).filter(([, value]) => value > 0).sort(([, a], [, b]) => b - a)
-  const max = Math.max(1, ...entries.map(([, value]) => value))
-  const total = entries.reduce((sum, [, value]) => sum + value, 0)
-  return <div className="ad-horizontal-bars" role="img" aria-label="Order count by fulfillment channel">{entries.length ? entries.map(([key, value]) => <div key={key}><span><b>{labels[key] || key}</b><small>{total ? `${((value / total) * 100).toFixed(0)}%` : '0%'}</small></span><i><em style={{ width: `${(value / max) * 100}%` }} /></i><strong>{value}</strong></div>) : <EmptyState icon={ReceiptText} text="No orders have been recorded today." />}</div>
+  return <motion.div className="ad-ranked-list" variants={microContainerVariants}>{products.length ? products.map((item, index) => <motion.div key={item.name} variants={microItemVariants}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.qty} sold - {money(item.revenue)}</small><i><em style={{ width: `${(item.qty / max) * 100}%` }} /></i></div></motion.div>) : <EmptyState icon={Coffee} text="No completed product sales yet." />}</motion.div>
 }
 
 function EmptyState({ icon: Icon, text }) {
@@ -368,5 +577,5 @@ function EmptyState({ icon: Icon, text }) {
 }
 
 function DashboardSkeleton() {
-  return <div className="ad-skeleton" aria-label="Loading dashboard"><i className="wide" /><div>{Array.from({ length: 6 }).map((_, index) => <i key={index} />)}</div><div>{Array.from({ length: 4 }).map((_, index) => <i key={index} />)}</div><i className="tall" /><i className="tall" /></div>
+  return <div className="ad-skeleton" aria-label="Loading dashboard"><i className="wide" /><div>{Array.from({ length: 4 }).map((_, index) => <i key={index} />)}</div><div>{Array.from({ length: 3 }).map((_, index) => <i key={index} />)}</div><i className="tall" /><i className="tall" /></div>
 }

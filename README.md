@@ -30,6 +30,8 @@ Nested staff and admin URLs currently reuse their role dashboard shell, ready fo
 
 Optional: copy `.env.example` to `.env` only if you want to override the built-in public Supabase URL/anon key.
 
+If you are setting this up on a different computer, see [SETUP_ON_ANOTHER_PC.md](./SETUP_ON_ANOTHER_PC.md) for a full clone, install, run, update, and troubleshooting guide.
+
 ## Structure
 
 ```text

@@ -13,6 +13,7 @@ import { useProductCustomization } from '../../hooks/useProductCustomization'
 import Choice from '../../components/Choice'
 import { isSupabaseConfigured, supabase } from '../../lib/supabase'
 import { SYSTEM_DEFAULTS, fetchPublicDeliveryAreas, fetchPublicPortalData } from '../../services/adminPortalConfigurationService'
+import { normalizeOrderTemperature } from '../../utils/temperature'
 export function MenuPage(){const [query,setQuery]=useState('');const [category,setCategory]=useState('All');const [chipMotion,setChipMotion]=useState('All');const {products,categories,loading,error}=useMenuCatalog();const {addToCart,openProduct,modal}=useProductCustomization({modalVariant:'menu-detail'});useEffect(()=>{const timeout=window.setTimeout(()=>setChipMotion(''),460);return()=>window.clearTimeout(timeout)},[category]);const filtered=products.filter(p=>(category==='All'||p.category===category)&&`${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase()));return <main className="customer-main"><section className="page-hero"><span>Made fresh in North Fairview</span><h1>Find your next favorite.</h1></section><div className="menu-tools"><label><Search/><span className="sr-only">Search menu</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search drinks, cakes, and meals"/></label><div className="menu-chip-row">{categories.map(c=><button className={`category-chip ${c===category?'active':''} ${c===chipMotion?'is-switching':''}`.trim()} onClick={()=>{setChipMotion(c);setCategory(c)}} key={c} type="button">{c}</button>)}</div></div>{loading?<section className="customer-state">Loading today’s menu…</section>:error?<section className="customer-state error-state"><h2>We couldn’t load the menu.</h2><p>{error}</p></section>:<section className="customer-products menu-results-grid" key={`${category}-${query}`}>{filtered.map(p=><ProductCard key={p.id} product={p} onAddToCart={addToCart} onPreview={openProduct}/>)}</section>}
     {modal}
   </main>
@@ -202,7 +203,7 @@ export function OrderReviewPage(){
       }
       let order=createdOrder
       if(!order){
-        const response=await createCustomerOrder({request_key:requestKey,customer:{...form},items:items.map(item=>({product_id:item.productId,variation_id:item.variation?.id,temperature:item.temperature,addon_ids:item.addons.map(addon=>addon.id),quantity:item.quantity,special_instructions:item.instructions})),fulfillment_method:form.fulfillment,payment_method:form.payment})
+        const response=await createCustomerOrder({request_key:requestKey,customer:{...form},items:items.map(item=>({product_id:item.productId,variation_id:item.variation?.id,temperature:normalizeOrderTemperature(item.temperature),addon_ids:(item.addons||[]).map(addon=>addon.id),quantity:item.quantity,special_instructions:item.instructions})),fulfillment_method:form.fulfillment,payment_method:form.payment})
         order=mergePlacedOrderData({order:Array.isArray(response)?response[0]:response,form,items,total})
         setCreatedOrder(order)
       }

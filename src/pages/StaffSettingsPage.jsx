@@ -7,16 +7,13 @@ import { describeError } from '../utils/describeError'
 import {
   changeStaffPassword, DEFAULT_STAFF_PREFERENCES, fetchStaffPreferences,
   fetchPreciseStaffLocation, fetchStaffSessionInfo,
-  NOTIFICATION_STAFF_PREFERENCE_KEYS, previewStaffPreferences, saveStaffPreferences, saveStaffProfile,
+  MANAGEMENT_DISPLAY_PREFERENCE_KEYS, NOTIFICATION_STAFF_PREFERENCE_KEYS, previewStaffPreferences, saveStaffPreferences, saveStaffProfile,
   verifyStaffCurrentPassword, WORKSPACE_STAFF_PREFERENCE_KEYS,
 } from '../services/staffSettingsService'
 import {
   clearManagementSessionState, hasManagementSessionState, readManagementSessionState,
   useManagementSessionState, writeManagementSessionState,
 } from '../hooks/useManagementSessionState'
-
-const PROFILE_DRAFT_SCOPE = 'staff:settings:profile-draft'
-const PREFERENCES_DRAFT_SCOPE = 'staff:settings:preferences-draft'
 
 const roleLabel = (role) => String(role || 'staff').replace(/[_-]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 const SETTINGS_TABS = [
@@ -43,15 +40,18 @@ function SelectField({ id, label, value, onChange, children, help }) {
   </label>
 }
 
-export default function StaffSettingsPage() {
+export default function StaffSettingsPage({ role = 'staff' }) {
   const location = useLocation()
   const { user, profile, updateProfile } = useAuth()
-  const profileDraftAtMount = useRef(hasManagementSessionState(PROFILE_DRAFT_SCOPE))
-  const preferencesDraftAtMount = useRef(hasManagementSessionState(PREFERENCES_DRAFT_SCOPE))
-  const [profileValues, setProfileValues] = useState(() => readManagementSessionState(PROFILE_DRAFT_SCOPE, { full_name: '', username: '' }))
-  const [preferences, setPreferences] = useState(() => readManagementSessionState(PREFERENCES_DRAFT_SCOPE, DEFAULT_STAFF_PREFERENCES))
+  const profileDraftScope = `${role}:settings:profile-draft`
+  const preferencesDraftScope = `${role}:settings:preferences-draft`
+  const workspacePreferenceKeys = role === 'admin' ? MANAGEMENT_DISPLAY_PREFERENCE_KEYS : WORKSPACE_STAFF_PREFERENCE_KEYS
+  const profileDraftAtMount = useRef(hasManagementSessionState(profileDraftScope))
+  const preferencesDraftAtMount = useRef(hasManagementSessionState(preferencesDraftScope))
+  const [profileValues, setProfileValues] = useState(() => readManagementSessionState(profileDraftScope, { full_name: '', username: '' }))
+  const [preferences, setPreferences] = useState(() => readManagementSessionState(preferencesDraftScope, DEFAULT_STAFF_PREFERENCES))
   const [passwords, setPasswords] = useState({ current: '', password: '', confirm: '' })
-  const [activeSection, setActiveSection] = useManagementSessionState('staff:settings:active-section', 'profile')
+  const [activeSection, setActiveSection] = useManagementSessionState(`${role}:settings:active-section`, 'profile')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState('')
   const [notice, setNotice] = useState('')
@@ -98,7 +98,7 @@ export default function StaffSettingsPage() {
   const updatePreference = (key, value) => {
     const next = { ...preferences, [key]: value }
     setPreferences(next)
-    writeManagementSessionState(PREFERENCES_DRAFT_SCOPE, next)
+    writeManagementSessionState(preferencesDraftScope, next)
     if (WORKSPACE_STAFF_PREFERENCE_KEYS.includes(key)) previewStaffPreferences(next)
   }
   const showNotice = (kind, message) => { setNoticeKind(kind); setNotice(message) }
@@ -112,7 +112,7 @@ export default function StaffSettingsPage() {
     try {
       const saved = await saveStaffProfile(user.id, profileValues)
       updateProfile((current) => ({ ...current, ...saved }))
-      clearManagementSessionState(PROFILE_DRAFT_SCOPE)
+      clearManagementSessionState(profileDraftScope)
       showNotice('success', 'Your profile has been updated.')
     } catch (error) {
       showNotice('error', error?.code === '23505' ? 'That username is already in use. Choose another one.' : describeError(error, 'Could not update your profile.'))
@@ -122,16 +122,19 @@ export default function StaffSettingsPage() {
   async function submitPreferences(event, section) {
     event.preventDefault()
     const isWorkspace = section === 'workspace'
-    const keys = isWorkspace ? WORKSPACE_STAFF_PREFERENCE_KEYS : NOTIFICATION_STAFF_PREFERENCE_KEYS
+    const keys = isWorkspace ? workspacePreferenceKeys : NOTIFICATION_STAFF_PREFERENCE_KEYS
     setSaving(section)
     try {
       const saved = await saveStaffPreferences(user.id, preferences, keys)
       setPreferences((current) => {
         const next = { ...current, ...saved }
-        writeManagementSessionState(PREFERENCES_DRAFT_SCOPE, next)
+        writeManagementSessionState(preferencesDraftScope, next)
         return next
       })
-      showNotice('success', isWorkspace ? 'Workspace preferences saved. Display changes apply now; start-page and order-board defaults apply the next time those views open.' : 'Notification preferences saved and applied.')
+      const workspaceMessage = role === 'admin'
+        ? 'Workspace preferences saved. Display changes apply immediately across the Admin portal.'
+        : 'Workspace preferences saved. Display changes apply now; start-page and order-board defaults apply the next time those views open.'
+      showNotice('success', isWorkspace ? workspaceMessage : 'Notification preferences saved and applied.')
     } catch (error) {
       showNotice('error', describeError(error, isWorkspace ? 'Could not save your workspace preferences.' : 'Could not save your notification preferences.'))
     } finally { setSaving('') }
@@ -154,10 +157,10 @@ export default function StaffSettingsPage() {
   const restoreWorkspaceDefaults = () => {
     const next = {
       ...preferences,
-      ...Object.fromEntries(WORKSPACE_STAFF_PREFERENCE_KEYS.map((key) => [key, DEFAULT_STAFF_PREFERENCES[key]])),
+      ...Object.fromEntries(workspacePreferenceKeys.map((key) => [key, DEFAULT_STAFF_PREFERENCES[key]])),
     }
     setPreferences(next)
-    writeManagementSessionState(PREFERENCES_DRAFT_SCOPE, next)
+    writeManagementSessionState(preferencesDraftScope, next)
     previewStaffPreferences(next)
   }
 
@@ -165,7 +168,7 @@ export default function StaffSettingsPage() {
     if (!user?.id) return
     try {
       const [savedPreferences, savedSession] = await Promise.all([fetchStaffPreferences(user.id), fetchStaffSessionInfo()])
-      if (!hasManagementSessionState(PREFERENCES_DRAFT_SCOPE)) setPreferences(savedPreferences)
+      if (!hasManagementSessionState(preferencesDraftScope)) setPreferences(savedPreferences)
       setSessionInfo((current) => current.source === 'device' ? { ...current, loading: false, ip: savedSession.ip } : { loading: false, ...savedSession, source: 'ip' })
     } catch (error) {
       showNotice('error', describeError(error, 'Could not refresh settings data.'))
@@ -175,14 +178,14 @@ export default function StaffSettingsPage() {
   const updateProfileDraft = (key, value) => {
     setProfileValues((current) => {
       const next = { ...current, [key]: value }
-      writeManagementSessionState(PROFILE_DRAFT_SCOPE, next)
+      writeManagementSessionState(profileDraftScope, next)
       return next
     })
   }
 
-  return <AppShell role="staff" title="Settings" onRefresh={refreshSettings}>
+  return <AppShell role={role} title="Settings" eyebrow={`Manage your ${role === 'admin' ? 'administrator' : 'operations'} account and workspace preferences.`} onRefresh={refreshSettings}>
     {notice && <p className={`staff-settings-notice ${noticeKind}`} role="status">{notice}</p>}
-    {loading ? <div className="staff-settings-loading">Loading your settings…</div> : <section className="staff-settings-container" aria-label="Staff settings">
+    {loading ? <div className="staff-settings-loading">Loading your settings…</div> : <section className="staff-settings-container" aria-label={`${roleLabel(role)} settings`}>
       <div className="staff-settings-tabs" role="tablist" aria-label="Settings sections">
         {SETTINGS_TABS.map(({ id, label, Icon }) => <button key={id} id={`${id}-tab`} type="button" role="tab" aria-selected={activeSection === id} aria-controls={`${id}-panel`} className={activeSection === id ? 'active' : ''} onClick={() => setActiveSection(id)}><Icon size={17} /><span>{label}</span></button>)}
       </div>
@@ -191,8 +194,8 @@ export default function StaffSettingsPage() {
         <header className="staff-profile-header"><span className="staff-settings-icon"><UserRound size={19} /></span><div><h2>My profile</h2><p>Keep the details shown to your team accurate.</p></div><div className="staff-role-summary staff-profile-role"><span>Account role</span><b><ShieldCheck size={16} />{roleLabel(profile?.role)}</b></div></header>
         <div className="staff-settings-grid">
           <label className="staff-settings-field" htmlFor="staff-full-name"><span>Full name</span><input id="staff-full-name" value={profileValues.full_name} onChange={(event) => updateProfileDraft('full_name', event.target.value)} autoComplete="name" required /></label>
-          <label className="staff-settings-field" htmlFor="staff-username"><span>Username <em>Optional</em></span><input id="staff-username" value={profileValues.username} onChange={(event) => updateProfileDraft('username', event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck="false" minLength="3" maxLength="32" pattern="[A-Za-z0-9._-]+" /><small>You can use this username or your email when signing in as staff.</small></label>
-          <label className="staff-settings-field"><span>Email address</span><input value={profile?.email || user?.email || ''} readOnly aria-readonly="true" /><small>Email changes require an administrator.</small></label>
+          <label className="staff-settings-field" htmlFor="staff-username"><span>Username <em>Optional</em></span><input id="staff-username" value={profileValues.username} onChange={(event) => updateProfileDraft('username', event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck="false" minLength="3" maxLength="32" pattern="[A-Za-z0-9._-]+" /><small>{role === 'admin' ? 'Used to identify you across the administration workspace.' : 'You can use this username or your email when signing in as staff.'}</small></label>
+          <label className="staff-settings-field"><span>Email address</span><input value={profile?.email || user?.email || ''} readOnly aria-readonly="true" /><small>{role === 'admin' ? 'Email changes are managed through Users & Access.' : 'Email changes require an administrator.'}</small></label>
           <div className="staff-profile-save"><button className="ops-main-action" type="submit" disabled={saving === 'profile'}><Save size={16} />{saving === 'profile' ? 'Saving…' : 'Save profile'}</button></div>
         </div>
       </form>}
@@ -222,10 +225,10 @@ export default function StaffSettingsPage() {
       </form>}
 
       {activeSection === 'workspace' && <form className="staff-settings-card" onSubmit={(event) => submitPreferences(event, 'workspace')}>
-        <header><span className="staff-settings-icon"><LayoutPanelTop size={19} /></span><div><h2>Workspace preferences</h2><p>Set the defaults that make your operational views work best for you.</p></div></header>
+        <header><span className="staff-settings-icon"><LayoutPanelTop size={19} /></span><div><h2>{role === 'admin' ? 'Admin workspace preferences' : 'Workspace preferences'}</h2><p>{role === 'admin' ? 'Adjust the density, accessibility, and behavior of your administration workspace.' : 'Set the defaults that make your operational views work best for you.'}</p></div></header>
         <div className="staff-workspace-groups">
-          <fieldset className="staff-workspace-group"><legend>Start page</legend><p>Choose where your staff workspace opens after sign-in.</p><SelectField id="landing-view" label="Open after sign-in" value={preferences.landing_view} onChange={(value) => updatePreference('landing_view', value)}><option value="orders">Order Preparation</option><option value="inventory">Inventory Management</option><option value="transactions">Transactions</option><option value="menu">Manage Menu</option></SelectField></fieldset>
-          <fieldset className="staff-workspace-group"><legend>Order board</legend><p>Set the view defaults for preparing and monitoring orders.</p><div className="staff-workspace-fields"><SelectField id="order-queue" label="Default order queue" value={preferences.order_queue} onChange={(value) => updatePreference('order_queue', value)}><option value="active">Active orders</option><option value="scheduled">Scheduled orders</option></SelectField><SelectField id="order-sort" label="Default order sorting" value={preferences.order_sort} onChange={(value) => updatePreference('order_sort', value)}><option value="priority">Priority</option><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="scheduled">Scheduled time</option></SelectField><SelectField id="fulfillment-filter" label="Default fulfillment filter" value={preferences.fulfillment_filter} onChange={(value) => updatePreference('fulfillment_filter', value)}><option value="all">All orders</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></SelectField><SettingToggle id="overdue-highlighting" checked={preferences.overdue_highlighting} onChange={(value) => updatePreference('overdue_highlighting', value)} title="Highlight overdue orders" description="Use a clear visual signal for active orders past their scheduled time." /></div></fieldset>
+          {role === 'staff' && <><fieldset className="staff-workspace-group"><legend>Start page</legend><p>Choose where your staff workspace opens after sign-in.</p><SelectField id="landing-view" label="Open after sign-in" value={preferences.landing_view} onChange={(value) => updatePreference('landing_view', value)}><option value="orders">Order Preparation</option><option value="inventory">Inventory Management</option><option value="transactions">Transactions</option><option value="menu">Manage Menu</option></SelectField></fieldset>
+          <fieldset className="staff-workspace-group"><legend>Order board</legend><p>Set the view defaults for preparing and monitoring orders.</p><div className="staff-workspace-fields"><SelectField id="order-queue" label="Default order queue" value={preferences.order_queue} onChange={(value) => updatePreference('order_queue', value)}><option value="active">Active orders</option><option value="scheduled">Scheduled orders</option></SelectField><SelectField id="order-sort" label="Default order sorting" value={preferences.order_sort} onChange={(value) => updatePreference('order_sort', value)}><option value="priority">Priority</option><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="scheduled">Scheduled time</option></SelectField><SelectField id="fulfillment-filter" label="Default fulfillment filter" value={preferences.fulfillment_filter} onChange={(value) => updatePreference('fulfillment_filter', value)}><option value="all">All orders</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></SelectField><SettingToggle id="overdue-highlighting" checked={preferences.overdue_highlighting} onChange={(value) => updatePreference('overdue_highlighting', value)} title="Highlight overdue orders" description="Use a clear visual signal for active orders past their scheduled time." /></div></fieldset></>}
           <fieldset className="staff-workspace-group"><legend>Display and behavior</legend><p>Adjust how much information is shown and how the interface responds.</p><div className="staff-workspace-fields"><SelectField id="table-density" label="Table density" value={preferences.table_density} onChange={(value) => updatePreference('table_density', value)}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></SelectField><SelectField id="rows-per-page" label="Rows per page" value={String(preferences.rows_per_page)} onChange={(value) => updatePreference('rows_per_page', Number(value))}><option value="10">10 rows</option><option value="25">25 rows</option><option value="50">50 rows</option></SelectField><SelectField id="reduced-motion" label="Motion" value={preferences.reduced_motion} onChange={(value) => updatePreference('reduced_motion', value)}><option value="system">Follow device settings</option><option value="reduce">Reduce motion</option><option value="full">Full motion</option></SelectField><SelectField id="font-size" label="Font size" value={preferences.font_size} onChange={(value) => updatePreference('font_size', value)} help="Previewed immediately. Save to keep it for your next session."><option value="standard">Standard</option><option value="large">Large</option><option value="extra_large">Extra large</option></SelectField></div><div className="staff-workspace-toggles"><SettingToggle id="remember-filters" checked={preferences.remember_filters} onChange={(value) => updatePreference('remember_filters', value)} title="Remember filters" description="Keep your most recent filters during your current browser session." /><SettingToggle id="high-contrast" checked={preferences.high_contrast} onChange={(value) => updatePreference('high_contrast', value)} title="Higher contrast" description="Increase the contrast of workspace surfaces and text." /></div></fieldset>
         </div>
         <footer><button className="ops-secondary-action" type="button" onClick={restoreWorkspaceDefaults}><RotateCcw size={16} />Restore defaults</button><button className="ops-main-action" type="submit" disabled={saving === 'workspace'}><Save size={16} />{saving === 'workspace' ? 'Saving…' : 'Save workspace preferences'}</button></footer>
@@ -238,7 +241,7 @@ export default function StaffSettingsPage() {
           <label className="staff-settings-field" htmlFor="new-password"><span>New password</span><input id="new-password" type="password" value={passwords.password} onChange={(event) => setPasswords((current) => ({ ...current, password: event.target.value }))} autoComplete="new-password" minLength="8" required /><small>At least 8 characters.</small></label>
           <label className="staff-settings-field" htmlFor="confirm-password"><span>Confirm new password</span><input id="confirm-password" type="password" value={passwords.confirm} onChange={(event) => setPasswords((current) => ({ ...current, confirm: event.target.value }))} autoComplete="new-password" minLength="8" required /></label>
         </div>
-        <footer className="staff-security-actions"><p className="staff-security-help">Forgot your current password? Contact an administrator to reset your account access.</p><button className="ops-main-action" type="submit" disabled={saving === 'password'}><LockKeyhole size={16} />{saving === 'password' ? 'Updating…' : 'Update password'}</button></footer>
+        <footer className="staff-security-actions"><p className="staff-security-help">{role === 'admin' ? 'Forgot your current password? Use account recovery or ask another administrator for help.' : 'Forgot your current password? Contact an administrator to reset your account access.'}</p><button className="ops-main-action" type="submit" disabled={saving === 'password'}><LockKeyhole size={16} />{saving === 'password' ? 'Updating…' : 'Update password'}</button></footer>
       </form>}
       </div>
     </section>}

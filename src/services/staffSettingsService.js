@@ -41,6 +41,15 @@ export const WORKSPACE_STAFF_PREFERENCE_KEYS = [
   'font_size',
 ]
 
+export const MANAGEMENT_DISPLAY_PREFERENCE_KEYS = [
+  'table_density',
+  'rows_per_page',
+  'remember_filters',
+  'reduced_motion',
+  'high_contrast',
+  'font_size',
+]
+
 export const NOTIFICATION_STAFF_PREFERENCE_KEYS = [
   'notify_new_orders',
   'notify_payment_proofs',
