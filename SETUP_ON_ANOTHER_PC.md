@@ -64,7 +64,7 @@ Inside the project folder, run:
 npm install
 ```
 
-This downloads the React, Vite, Supabase, and other packages listed in [package.json](/C:/Users/Francis/Documents/tcr%20v2/thecoffeerealmcaps/package.json).
+This downloads the React, Vite, Supabase, and other packages listed in [package.json](package.json).
 
 ## 4. Environment setup
 
