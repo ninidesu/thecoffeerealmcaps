@@ -4,8 +4,10 @@ import {
   MapPin, Package, Phone, RefreshCw, Search, ShoppingBag, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
+import { usePricing } from '../context/usePricing'
 import { money } from '../utils/money'
 import { describeError } from '../utils/describeError'
+import { buildVatExemptOrderBreakdown, formatVatRate } from '../utils/pricing'
 import {
   fetchOpsOrders, fetchAddonNameMap, confirmOrder, advanceOrderStatus,
   cancelOrder, reviewCancellation, resolveCancellation, completeCancellationRefund, getPaymentProofUrl,
@@ -726,12 +728,16 @@ function CancellationReviewModal({ order, busy, onClose, onSubmit }) {
 }
 
 function OrderDrawer({ order, addonNames, onClose, onMain, onCancel, busy }) {
+  const { pricing } = usePricing()
   const [proofUrl, setProofUrl] = useState('')
   const [proofError, setProofError] = useState('')
   const method = paymentMethod(order)
   const stage = stageOf(order)
   const main = mainActionFor(order)
   const canCancel = stage !== 'completed' && stage !== 'cancelled' && !cancellationRequested(order)
+  const vatRate = order.vat_rate ?? pricing.vatRate
+  const pricesIncludeVat = order.prices_include_vat !== false
+  const breakdown = buildVatExemptOrderBreakdown({ subtotal: order.subtotal, discountSubtotal: order.discount_subtotal, discountType: order.discount_type, discountAmount: order.discount_amount, vatExemptAmount: order.vat_exempt_amount, vatRate, pricesIncludeVat })
 
   useEffect(() => {
     setProofUrl(''); setProofError('')
@@ -819,7 +825,15 @@ function OrderDrawer({ order, addonNames, onClose, onMain, onCancel, busy }) {
           <section>
             <h3>Price breakdown</h3>
             <div className="ops-price-rows">
-              <p><span>Subtotal</span><b>{money(order.subtotal)}</b></p>
+              {breakdown.isVatExemptDiscount ? <>
+                {breakdown.regularBaseAmount > 0 && <p><span>VATable Sale</span><b>{money(breakdown.regularBaseAmount)}</b></p>}
+                <p><span>VAT-Exempt Sale</span><b>{money(breakdown.vatExemptSale)}</b></p>
+                <p><span>{formatVatRate(vatRate)} VAT</span><b>{money(breakdown.regularVatAmount)}</b></p>
+                <p><span>Less 20% SC/PWD Disc.</span><b>-{money(breakdown.discountAmount)}</b></p>
+              </> : <>
+                <p><span>Subtotal</span><b>{money(breakdown.baseAmount)}</b></p>
+                <p><span>{pricesIncludeVat ? `VAT included (${formatVatRate(vatRate)})` : 'VAT calculated at checkout'}</span><b>{money(breakdown.vatAmount)}</b></p>
+              </>}
               {order.order_type === 'delivery' && <p><span>Delivery fee</span><b>{money(order.delivery_fee || 0)}</b></p>}
               <p className="ops-price-total"><span>Total</span><b>{money(order.final_total)}</b></p>
             </div>

@@ -7,8 +7,10 @@ import {
   Search, Settings2, ShoppingBag, TrendingUp, Undo2, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
+import { usePricing } from '../context/usePricing'
 import { money } from '../utils/money'
 import { describeError } from '../utils/describeError'
+import { buildVatExemptOrderBreakdown, formatVatRate } from '../utils/pricing'
 import { getCurrentPortalSession, normalizeRole } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import {
@@ -172,7 +174,18 @@ function receiptMoney(value) {
   return `PHP ${Number(value || 0).toFixed(2)}`
 }
 
-function buildReceiptHtml(transaction) {
+function buildReceiptHtml(transaction, pricing) {
+  const vatRate = transaction.vatRate ?? pricing?.vatRate ?? 0.12
+  const pricesIncludeVat = transaction.pricesIncludeVat ?? pricing?.pricesIncludeVat ?? true
+  const breakdown = buildVatExemptOrderBreakdown({
+    subtotal: transaction.subtotal,
+    discountSubtotal: transaction.discountSubtotal,
+    discountType: transaction.discountType,
+    discountAmount: transaction.discountAmount,
+    vatExemptAmount: transaction.vatExemptAmount,
+    vatRate,
+    pricesIncludeVat,
+  })
   const itemsMarkup = transaction.items.map((item) => {
     const detailLines = []
     const customizations = item.customizations || {}
@@ -227,20 +240,26 @@ function buildReceiptHtml(transaction) {
       <div class="line"></div>
       ${itemsMarkup}
       <div class="line"></div>
-      <div class="total"><span>Subtotal</span><span>${receiptMoney(transaction.subtotal)}</span></div>
-      ${transaction.discountAmount > 0 ? `<div class="total"><span>Discount</span><span>- ${receiptMoney(transaction.discountAmount)}</span></div>` : ''}
-      ${transaction.deliveryFee > 0 ? `<div class="total"><span>Delivery Fee</span><span>${receiptMoney(transaction.deliveryFee)}</span></div>` : ''}
-      <div class="total grand"><span>Total</span><span>${receiptMoney(transaction.finalTotal)}</span></div>
+       ${breakdown.isVatExemptDiscount
+         ? `${breakdown.regularBaseAmount > 0 ? `<div class="total"><span>VATable Sale</span><span>${receiptMoney(breakdown.regularBaseAmount)}</span></div>` : ''}
+            <div class="total"><span>VAT-Exempt Sale</span><span>${receiptMoney(breakdown.vatExemptSale)}</span></div>
+            <div class="total"><span>${formatVatRate(vatRate)} VAT</span><span>${receiptMoney(breakdown.regularVatAmount)}</span></div>
+            <div class="total"><span>Less 20% SC/PWD Disc.</span><span>- ${receiptMoney(breakdown.discountAmount)}</span></div>`
+         : `<div class="total"><span>Subtotal</span><span>${receiptMoney(breakdown.baseAmount)}</span></div>
+            ${transaction.discountAmount > 0 ? `<div class="total"><span>Discount</span><span>- ${receiptMoney(transaction.discountAmount)}</span></div>` : ''}
+            <div class="total"><span>VAT (${formatVatRate(vatRate)})</span><span>${receiptMoney(breakdown.vatAmount)}</span></div>`}
+       ${transaction.deliveryFee > 0 ? `<div class="total"><span>Delivery Fee</span><span>${receiptMoney(transaction.deliveryFee)}</span></div>` : ''}
+       <div class="total grand"><span>Total</span><span>${receiptMoney(transaction.finalTotal)}</span></div>
       <div class="total"><span>Item Count</span><span>${transaction.itemCount}</span></div>
       <div class="line"></div>
       <div class="center sub">Please keep this receipt for reference.</div>
     </div></body></html>`
 }
 
-function openReceiptWindow(transaction, shouldPrint = false) {
+function openReceiptWindow(transaction, shouldPrint = false, pricing) {
   const win = window.open('', '_blank', 'width=460,height=900')
   if (!win) return false
-  win.document.write(buildReceiptHtml(transaction))
+  win.document.write(buildReceiptHtml(transaction, pricing))
   win.document.close()
   if (shouldPrint) {
     setTimeout(() => {
@@ -251,8 +270,8 @@ function openReceiptWindow(transaction, shouldPrint = false) {
   return true
 }
 
-function downloadReceiptHtml(transaction) {
-  const blob = new Blob([buildReceiptHtml(transaction)], { type: 'text/html;charset=utf-8' })
+function downloadReceiptHtml(transaction, pricing) {
+  const blob = new Blob([buildReceiptHtml(transaction, pricing)], { type: 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -301,6 +320,7 @@ function deriveTab(orderSource, fulfillment, orderStatus, voidedOnly) {
 
 export default function TransactionsPage() {
   const location = useLocation()
+  const { pricing } = usePricing()
   const [transactions, setTransactions] = useState([])
   const [summaryRows, setSummaryRows] = useState([])
   const [staffOptions, setStaffOptions] = useState([])
@@ -578,17 +598,17 @@ export default function TransactionsPage() {
   }
 
   const viewReceipt = (transaction) => {
-    if (!openReceiptWindow(transaction)) pushToast('error', 'The receipt window was blocked by the browser.')
+    if (!openReceiptWindow(transaction, false, pricing)) pushToast('error', 'The receipt window was blocked by the browser.')
     setRowMenuId('')
   }
 
   const printReceipt = (transaction) => {
-    if (!openReceiptWindow(transaction, true)) pushToast('error', 'The print window was blocked by the browser.')
+    if (!openReceiptWindow(transaction, true, pricing)) pushToast('error', 'The print window was blocked by the browser.')
     setRowMenuId('')
   }
 
   const downloadReceipt = (transaction) => {
-    downloadReceiptHtml(transaction)
+    downloadReceiptHtml(transaction, pricing)
     pushToast('success', `Downloaded receipt for ${transaction.receiptNumber}.`)
     setRowMenuId('')
   }
@@ -1047,6 +1067,7 @@ function TransactionDrawer({
   transactionId, initialTransaction, canManageFinancialActions, busyId, onClose, onViewReceipt,
   onPrintReceipt, onDownloadReceipt, onViewProof, onRequestRefund, onProcessRefund, onVoid, onCorrectPayment,
 }) {
+  const { pricing } = usePricing()
   const [transaction, setTransaction] = useState(initialTransaction)
   const [audit, setAudit] = useState([])
   const [proofUrl, setProofUrl] = useState('')
@@ -1083,6 +1104,17 @@ function TransactionDrawer({
 
   const refundMeta = refundStatusMeta(transaction)
   const paymentMeta = paymentStatusMeta(transaction)
+  const vatRate = transaction.vatRate ?? pricing.vatRate
+  const pricesIncludeVat = transaction.pricesIncludeVat !== false
+  const breakdown = buildVatExemptOrderBreakdown({
+    subtotal: transaction.subtotal,
+    discountSubtotal: transaction.discountSubtotal,
+    discountType: transaction.discountType,
+    discountAmount: transaction.discountAmount,
+    vatExemptAmount: transaction.vatExemptAmount,
+    vatRate,
+    pricesIncludeVat,
+  })
   const canRefund = canManageFinancialActions && paymentMeta.key === 'paid' && processedRefundAmount(transaction) < transaction.finalTotal && !transaction.isVoided
   const timeline = buildTimeline(transaction, audit)
   const sectionIds = {
@@ -1164,8 +1196,16 @@ function TransactionDrawer({
               ))}
             </ul>
             <div className="txn-total-list" aria-label="Order total breakdown">
-              <div><span>Subtotal</span><b>{money(transaction.subtotal)}</b></div>
-              <div><span>Discounts</span><b>{transaction.discountAmount > 0 ? `- ${money(transaction.discountAmount)}` : '—'}</b></div>
+              {breakdown.isVatExemptDiscount ? <>
+                {breakdown.regularBaseAmount > 0 && <div><span>VATable Sale</span><b>{money(breakdown.regularBaseAmount)}</b></div>}
+                <div><span>VAT-Exempt Sale</span><b>{money(breakdown.vatExemptSale)}</b></div>
+                <div><span>{formatVatRate(vatRate)} VAT</span><b>{money(breakdown.regularVatAmount)}</b></div>
+                <div><span>Less 20% SC/PWD Disc.</span><b>- {money(breakdown.discountAmount)}</b></div>
+              </> : <>
+                <div><span>Subtotal</span><b>{money(breakdown.baseAmount)}</b></div>
+                <div><span>{pricesIncludeVat ? `VAT included (${formatVatRate(vatRate)})` : 'VAT calculated at checkout'}</span><b>{money(breakdown.vatAmount)}</b></div>
+                <div><span>Discounts</span><b>{transaction.discountAmount > 0 ? `- ${money(transaction.discountAmount)}` : '—'}</b></div>
+              </>}
               <div><span>Delivery fee</span><b>{transaction.deliveryFee > 0 ? money(transaction.deliveryFee) : '—'}</b></div>
               <div className="total"><span>Total</span><b>{money(transaction.finalTotal)}</b></div>
             </div>

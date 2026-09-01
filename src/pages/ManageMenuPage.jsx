@@ -560,7 +560,7 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
                   </div>
                   <div className="form-grid menu-form-grid">
                     <label className="field"><span>Item name</span><input autoFocus value={values.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Spanish Latte" required /></label>
-                    <label className="field"><span>Base price (PHP)</span><input type="number" min="0" step="0.01" value={values.price} onChange={(e) => set('price', e.target.value)} placeholder="0.00" required /></label>
+                    <label className="field"><span>Menu price incl. VAT (PHP)</span><input type="number" min="0" step="0.01" value={values.price} onChange={(e) => set('price', e.target.value)} placeholder="0.00" required /></label>
                     <label className="field"><span>Main category</span><select value={values.mainCategoryId} onChange={(e) => { set('mainCategoryId', e.target.value); set('subcategoryId', '') }}>{mainCategories.filter((c) => !c.is_archived).map((c) => <option key={c.id} value={c.id}>{c.display_name || c.name}</option>)}</select></label>
                     <label className="field"><span>Subcategory</span><select value={values.subcategoryId} onChange={(e) => set('subcategoryId', e.target.value)}><option value="">No subcategory</option>{availableSubcategories.map((s) => <option key={s.id} value={s.id}>{s.display_name || s.name}</option>)}</select></label>
                     <label className="field"><span>Item type</span><select value={values.itemType} onChange={(e) => set('itemType', e.target.value)}><option value="drink">Drink</option><option value="food">Food</option></select></label>

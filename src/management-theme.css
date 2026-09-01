@@ -779,7 +779,8 @@ html[data-staff-motion="reduce"] .app-layout.legacy-admin .cancel-animated-path,
 .app-layout.legacy-admin[data-theme="dark"] .srp-tooltip-prev{color:var(--mgmt-muted)}
 .app-layout.legacy-admin[data-theme="dark"] :is(.ad-chart-gridline,.srp-chart-gridline){stroke:var(--mgmt-border)}
 .app-layout.legacy-admin[data-theme="dark"] :is(.ad-sales-line,.srp-trend-line){stroke:var(--mgmt-primary)}
-.app-layout.legacy-admin[data-theme="dark"] :is(.ad-sales-chart circle,.srp-trend-chart circle){fill:var(--mgmt-surface);stroke:var(--mgmt-primary)}
+.app-layout.legacy-admin[data-theme="dark"] :is(.ad-sales-chart .ad-sales-point,.srp-trend-chart .srp-dot:not(.is-active)){fill:var(--mgmt-surface);stroke:var(--mgmt-primary)}
+.app-layout.legacy-admin[data-theme="dark"] :is(.ad-sales-chart g.is-active .ad-sales-point,.srp-trend-chart .srp-dot.is-active){fill:var(--mgmt-primary)}
 
 .app-layout.legacy-admin[data-theme="dark"] ::selection{background:color-mix(in srgb,var(--mgmt-primary) 36%,transparent);color:var(--mgmt-heading)}
 .app-layout.legacy-admin[data-theme="dark"]{scrollbar-color:var(--mgmt-border-strong) var(--mgmt-canvas)}

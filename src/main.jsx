@@ -4,8 +4,10 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { AuthProvider } from './context/AuthContext'
 import { CartProvider } from './context/CartContext'
+import { PricingProvider } from './context/PricingContext'
 import { ThemeProvider } from './context/ThemeContext'
 import './styles.css'
 import './management-theme.css'
 import './cashier-polish.css'
-createRoot(document.getElementById('root')).render(<StrictMode><BrowserRouter><ThemeProvider><AuthProvider><CartProvider><App/></CartProvider></AuthProvider></ThemeProvider></BrowserRouter></StrictMode>)
+import './pricing.css'
+createRoot(document.getElementById('root')).render(<StrictMode><BrowserRouter><ThemeProvider><PricingProvider><AuthProvider><CartProvider><App /></CartProvider></AuthProvider></PricingProvider></ThemeProvider></BrowserRouter></StrictMode>)

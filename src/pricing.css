@@ -1,0 +1,37 @@
+.cashier-vat-indicator {
+  align-items: center;
+  justify-content: space-between !important;
+  gap: 7px;
+  margin: 6px 0 !important;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted) !important;
+  font-size: 0.95rem !important;
+  font-weight: 400;
+}
+
+.cashier-vat-indicator > b {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: inherit;
+  color: inherit;
+}
+
+html[data-theme='dark'] .cashier-v2 .legacy-ticket-total p.cashier-vat-indicator,
+html[data-theme='dark'] .cashier-v2 .legacy-ticket-total p.cashier-vat-indicator span,
+html[data-theme='dark'] .cashier-v2 .legacy-ticket-total p.cashier-vat-indicator b {
+  color: #aeb8b1 !important;
+}
+
+.customer-vat-row {
+  color: var(--cr-muted, #68766c);
+  font-size: 0.78rem !important;
+}
+
+.customer-vat-row b {
+  color: inherit;
+  font-size: inherit;
+}

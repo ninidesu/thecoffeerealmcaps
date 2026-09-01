@@ -18,10 +18,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import LogoutConfirmModal from '../components/auth/LogoutConfirmModal'
+import { usePricing } from '../context/usePricing'
 import { useTheme } from '../context/ThemeContext'
 import { menuItems, store } from '../data/mockData'
 import { getCurrentPortalSession, signOutPortal } from '../lib/auth'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { buildVatExemptOrderBreakdown, formatVatRate } from '../utils/pricing'
 
 const paymentMethods = [
   { value: 'Cash', label: 'Cash', icon: Banknote },
@@ -185,6 +187,16 @@ function normalizeProduct(row) {
 function normalizeOrder(row) {
   const items = row.order_items || row.items || []
   const payment = Array.isArray(row.payments) ? row.payments[0] : row.payment
+  const normalizedItems = items.map((item) => ({
+    ...item,
+    id: item.id,
+    name: item.name || item.display_name || item.item_name || item.product_name || 'Menu item',
+    qty: Number(item.qty ?? item.quantity ?? 0),
+    quantity: Number(item.quantity ?? item.qty ?? 0),
+    unitPrice: Number(item.unitPrice ?? item.unit_price ?? item.price ?? 0),
+    line_total: Number(item.line_total ?? item.lineTotal ?? 0),
+    isDiscounted: Boolean(item.isDiscounted ?? item.is_discounted),
+  }))
   return {
     id: row.id,
     orderNumber: row.order_number || row.reference_code || `Walk-in #${row.id}`,
@@ -192,17 +204,54 @@ function normalizeOrder(row) {
     subtotal: Number(row.subtotal || row.discount_subtotal || row.final_total || 0),
     discountAmount: Number(row.discount_amount || 0),
     discountType: row.discount_type || '',
+    discountSubtotal: Number(row.discount_subtotal || 0),
     total: Number(row.final_total || row.subtotal || 0),
     paymentMethod: payment?.method || row.payment_method || 'Cash',
     paymentReference: payment?.reference_number || row.payment_reference || '',
     bankName: payment?.bank_name || row.bank_name || '',
     cashReceived: Number(payment?.amount_received ?? row.amount_received ?? 0),
     change: Number(payment?.change_amount ?? row.change_amount ?? 0),
+    accountNumber: payment?.account_number || row.account_number || '',
+    cashierName: row.cashier_name || '',
     discountCustomerName: row.discount_customer_name || '',
     discountIdNumber: row.discount_id_number || '',
+    vatRate: row.vat_rate == null ? null : Number(row.vat_rate),
+    pricesIncludeVat: row.prices_include_vat == null ? null : Boolean(row.prices_include_vat),
     createdAt: row.created_at,
-    items,
+    items: normalizedItems,
   }
+}
+
+function storedOrderVatBreakdown(order, vatRate, pricesIncludeVat) {
+  const fallbackDiscountSubtotal = (order.items || [])
+    .filter((item) => Boolean(item.isDiscounted ?? item.is_discounted))
+    .reduce((sum, item) => {
+      const lineTotal = Number(item.line_total ?? item.lineTotal ?? 0)
+      const addonsTotal = Number(item.addons_total ?? item.addonsTotal ?? 0)
+      return sum + Math.max(0, lineTotal - addonsTotal)
+    }, 0)
+  const discountSubtotal = Number(order.discountSubtotal || 0) || roundMoney(fallbackDiscountSubtotal)
+  return buildVatExemptOrderBreakdown({
+    subtotal: order.subtotal,
+    discountSubtotal,
+    discountType: order.discountType,
+    discountAmount: order.discountAmount,
+    vatExemptAmount: order.vatExemptAmount,
+    vatRate,
+    pricesIncludeVat,
+  })
+}
+
+function cartVatBreakdown({ subtotal, discount, discountBreakdown, vatRate, pricesIncludeVat }) {
+  return buildVatExemptOrderBreakdown({
+    subtotal,
+    discountSubtotal: discount.enabled ? discountBreakdown.discountSubtotal : 0,
+    discountType: discount.enabled ? discount.type : '',
+    discountAmount: discount.enabled ? discountBreakdown.totalBenefitAmount : 0,
+    vatExemptAmount: discount.enabled ? discountBreakdown.vatExemptAmount : 0,
+    vatRate,
+    pricesIncludeVat,
+  })
 }
 
 function validatePayment(payment, total) {
@@ -222,6 +271,7 @@ function validatePayment(payment, total) {
 
 export default function CashierPage() {
   const navigate = useNavigate()
+  const { pricing } = usePricing()
   const { resolvedTheme, setPreference } = useTheme()
   const isDarkMode = resolvedTheme === 'dark'
   const fallbackProducts = useMemo(() => menuItems.map((item) => ({
@@ -266,7 +316,7 @@ export default function CashierPage() {
       setLoading(true)
       const [productResult, orderResult] = await Promise.all([
         loadMenuItems(),
-        supabase.from('orders').select('id,order_number,customer_name,subtotal,discount_amount,final_total,payment_status,payment_confirmed,discount_type,discount_customer_name,discount_id_number,created_at,order_items(*),payments(*)').eq('order_type', 'walk-in').order('created_at', { ascending: false }).limit(30),
+        supabase.from('orders').select('id,order_number,customer_name,subtotal,discount_subtotal,discount_amount,final_total,vat_rate,prices_include_vat,payment_status,payment_confirmed,discount_type,discount_customer_name,discount_id_number,created_at,order_items(*),payments(*)').eq('order_type', 'walk-in').order('created_at', { ascending: false }).limit(30),
       ])
       if (ignore) return
       if (!productResult.error) {
@@ -353,7 +403,19 @@ export default function CashierPage() {
     ? cart.filter((item) => discountedLineKeys.includes(item.lineKey)).reduce((sum, item) => sum + itemBaseTotal(item), 0)
     : 0
   const discountAmount = discount.enabled ? roundMoney(discountSubtotal * 0.2) : 0
-  const total = Math.max(0, subtotal - discountAmount)
+  const discountBreakdown = {
+    discountSubtotal,
+    totalBenefitAmount: discountAmount,
+    vatExemptAmount: 0,
+  }
+  const priceBreakdown = cartVatBreakdown({
+    subtotal,
+    discount,
+    discountBreakdown,
+    vatRate: pricing.vatRate,
+    pricesIncludeVat: pricing.pricesIncludeVat,
+  })
+  const total = Math.max(0, priceBreakdown.totalAmount)
   const change = payment.method === 'Cash' ? Math.max(0, Number(payment.cashReceived || 0) - total) : 0
   const cashierName = cashierProfile?.full_name || cashierProfile?.username || cashierProfile?.email || 'Cashier'
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0)
@@ -466,6 +528,8 @@ export default function CashierPage() {
         discountType: discount.enabled ? discount.type : '',
         discountCustomerName: discount.enabled ? discount.customerName : '',
         discountIdNumber: discount.enabled ? discount.idNumber : '',
+        vatRate: pricing.vatRate,
+        pricesIncludeVat: pricing.pricesIncludeVat,
         discountSubtotal,
         cashierName: cashierProfile?.full_name || cashierProfile?.username || cashierProfile?.email || 'Cashier',
         total,
@@ -643,7 +707,7 @@ export default function CashierPage() {
           <div className="cashier-cart-count"><span>Items</span><b>{cartCount}</b></div>
           <POSCart cart={cart} onQty={changeQty} onEdit={editCartItem} />
           <div className="cashier-checkout-block">
-            <OrderSummary subtotal={subtotal} total={total} />
+            <OrderSummary subtotal={subtotal} total={total} vatRate={pricing.vatRate} pricesIncludeVat={pricing.pricesIncludeVat} breakdown={priceBreakdown} />
             {error ? <div className="cashier-error">{error}</div> : null}
             <button type="button" className="legacy-charge" onClick={() => setShowCheckout(true)} disabled={!cart.length}>Checkout</button>
           </div>
@@ -655,7 +719,7 @@ export default function CashierPage() {
       </div>
       <LogoutConfirmModal open={logoutOpen} busy={loggingOut} onCancel={() => setLogoutOpen(false)} onConfirm={logout} />
 
-      {showCheckout ? <CheckoutModal cart={cart} subtotal={subtotal} total={total} discount={discount} discountAmount={discountAmount} setDiscount={setDiscount} payment={payment} setPayment={setPayment} change={change} error={error} saving={savingOrder} onCancel={() => { if (!savingOrder) { setShowCheckout(false); setError('') } }} onConfirm={async () => { if (await saveOrder()) setShowCheckout(false) }} /> : null}
+      {showCheckout ? <CheckoutModal cart={cart} total={total} vatRate={pricing.vatRate} pricesIncludeVat={pricing.pricesIncludeVat} discount={discount} breakdown={priceBreakdown} setDiscount={setDiscount} payment={payment} setPayment={setPayment} change={change} error={error} saving={savingOrder} onCancel={() => { if (!savingOrder) { setShowCheckout(false); setError('') } }} onConfirm={async () => { if (await saveOrder()) setShowCheckout(false) }} /> : null}
       {customizingProduct ? <ItemCustomizationModal product={customizingProduct} onClose={() => setCustomizingProduct(null)} onAdd={(customizations, addons, quantity) => { updateConfiguredItem(customizingProduct, customizations, addons, quantity); setCustomizingProduct(null) }} /> : null}
       {showTransactions ? <CashierTransactionsModal transactions={transactions} onClose={() => setShowTransactions(false)} onViewDetails={openTransactionDetails} onOpenReceipt={(order) => { setReceipt(order); setShowTransactions(false) }} /> : null}
       {transactionDetails ? <TransactionDetailsModal order={transactionDetails} onBack={() => setTransactionDetails(null)} onClose={() => { setTransactionDetails(null); setShowTransactions(false) }} /> : null}
@@ -824,12 +888,35 @@ function PaymentPanel({ payment, setPayment, total, change }) {
   return <section className="cashier-panel"><div className="cashier-payment-methods">{paymentMethods.map(({ value, label, icon: Icon }) => <button type="button" className={payment.method === value ? 'active' : ''} key={value} onClick={() => setPayment((current) => ({ ...current, method: value }))}><Icon size={18} /> {label}</button>)}</div>{payment.method === 'Cash' ? <div className="cashier-form-grid"><input type="number" min={total} step="0.01" value={payment.cashReceived} onChange={(event) => setPayment((current) => ({ ...current, cashReceived: event.target.value }))} placeholder="Cash received" /><input readOnly value={`Change: ${peso(change)}`} /></div> : null}{payment.method === 'GCash' ? <div className="cashier-form-grid"><input value={payment.accountNumber} onChange={(event) => setPayment((current) => ({ ...current, accountNumber: event.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="09XXXXXXXXX" /><input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="13-digit reference" /></div> : null}{payment.method === 'Bank Transfer' ? <div className="cashier-form-grid"><input value={payment.bankName} onChange={(event) => setPayment((current) => ({ ...current, bankName: event.target.value }))} placeholder="Bank name" /><input value={payment.referenceNumber} onChange={(event) => setPayment((current) => ({ ...current, referenceNumber: event.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 30) }))} placeholder="Transfer reference" /></div> : null}</section>
 }
 
-function OrderSummary({ subtotal, total }) {
-  return <div className="legacy-ticket-total"><p><span>Subtotal</span><b>{peso(subtotal)}</b></p><hr /><p><strong>Total</strong><strong>{peso(total)}</strong></p></div>
+function CashierBreakdownRows({ breakdown, vatRate, pricesIncludeVat }) {
+  if (breakdown?.isVatExemptDiscount) {
+    return <>
+      {breakdown.regularBaseAmount > 0 ? <p><span>VATable Sale</span><b>{peso(breakdown.regularBaseAmount)}</b></p> : null}
+      <p><span>VAT-Exempt Sale</span><b>{peso(breakdown.vatExemptSale)}</b></p>
+      <p className="cashier-vat-indicator"><span>{formatVatRate(vatRate)} VAT</span><b>{peso(breakdown.regularVatAmount)}</b></p>
+      <p><span>Less 20% SC/PWD Disc.</span><b>-{peso(breakdown.discountAmount)}</b></p>
+    </>
+  }
+
+  return <>
+    <p><span>Subtotal</span><b>{peso(breakdown?.baseAmount || 0)}</b></p>
+    <p className="cashier-vat-indicator"><span>{pricesIncludeVat ? `VAT included (${formatVatRate(vatRate)})` : 'VAT calculated at checkout'}</span><b>{peso(breakdown?.vatAmount || 0)}</b></p>
+  </>
+}
+
+function OrderSummary({ subtotal, total, vatRate, pricesIncludeVat, breakdown }) {
+  const summary = breakdown || cartVatBreakdown({
+    subtotal,
+    discount: { enabled: false },
+    discountBreakdown: {},
+    vatRate,
+    pricesIncludeVat,
+  })
+  return <div className="legacy-ticket-total"><CashierBreakdownRows breakdown={summary} vatRate={vatRate} pricesIncludeVat={pricesIncludeVat} /><hr /><p><strong>Total</strong><strong>{peso(total)}</strong></p></div>
 }
 
 
-function CheckoutModal({ cart, subtotal, total, discount, discountAmount, setDiscount, payment, setPayment, change, error, saving, onCancel, onConfirm }) {
+function CheckoutModal({ cart, total, vatRate, pricesIncludeVat, discount, breakdown, setDiscount, payment, setPayment, change, error, saving, onCancel, onConfirm }) {
   const discountChoices = ['No Discount', 'PWD', 'Senior']
   const paymentChoices = [
     { value: 'Cash', label: 'Cash', icon: Banknote },
@@ -879,7 +966,7 @@ function CheckoutModal({ cart, subtotal, total, discount, discountAmount, setDis
             </label>
           })}
         </section>
-        <section className="checkout-totals"><p><span>Subtotal</span><b>{peso(subtotal)}</b></p>{discount.enabled ? <p><span>{discount.type || 'Discount'} on selected items</span><b>-{peso(discountAmount)}</b></p> : null}<p><strong>Total</strong><strong>{peso(total)}</strong></p></section>
+        <section className="checkout-totals"><CashierBreakdownRows breakdown={breakdown} vatRate={vatRate} pricesIncludeVat={pricesIncludeVat} /><p><strong>Total</strong><strong>{peso(total)}</strong></p></section>
         <section className="checkout-section"><h3>Discount</h3><div className="checkout-choice-grid">{discountChoices.map((choice) => <button type="button" key={choice} className={activeDiscount === choice ? 'active' : ''} onClick={() => chooseDiscount(choice)}>{choice}</button>)}</div>
           {discount.enabled ? <div className="checkout-field-grid"><label>Name<input autoComplete="name" value={discount.customerName} onChange={(event) => setDiscount((current) => ({ ...current, customerName: event.target.value }))} placeholder="Customer name" /></label><label>ID number<input inputMode="text" autoComplete="off" value={discount.idNumber} onChange={(event) => setDiscount((current) => ({ ...current, idNumber: event.target.value }))} placeholder="PWD or senior ID" /></label></div> : null}
         </section>
@@ -941,7 +1028,10 @@ function CashierTransactionsModal({ transactions, onViewDetails, onOpenReceipt, 
 
 function TransactionDetailsModal({ order, onBack, onClose }) {
   const items = order.items || []
-  const hasDiscount = Number(order.discountAmount || 0) > 0
+  const vatRate = order.vatRate ?? 0.12
+  const pricesIncludeVat = order.pricesIncludeVat !== false
+  const breakdown = storedOrderVatBreakdown(order, vatRate, pricesIncludeVat)
+  const hasDiscount = breakdown.isVatExemptDiscount
   const paymentDetails = [
     ...(order.paymentReference ? [['Reference number', order.paymentReference]] : []),
     ...(order.bankName ? [['Bank name', order.bankName]] : []),
@@ -954,7 +1044,7 @@ function TransactionDetailsModal({ order, onBack, onClose }) {
         <div className="detail-meta"><div><span>Order ID</span><b>{order.orderNumber}</b></div><div><span>Date</span><b>{formatReceiptDate(order.createdAt)}</b></div><div><span>Payment</span><b>{order.paymentMethod}</b></div></div>
         <section><h3>Items</h3><div className="detail-items">{items.length ? items.map((item, index) => <article key={item.lineKey || item.id || index}><div><b>{item.name || item.product_name || item.item_name || 'Menu item'}</b><span>{customizationDetails(item).join(' / ') || 'Standard preparation'}</span></div><span>&times;{item.qty || item.quantity || 0}</span><strong>{peso(item.line_total || itemLineTotal(item))}</strong></article>) : <p>No item details are available for this transaction.</p>}</div></section>
         <section className="detail-summary"><h3>Payment details</h3>{paymentDetails.length ? <div>{paymentDetails.map(([label, value]) => <p key={label}><span>{label}</span><b>{value}</b></p>)}</div> : <p>Payment details are not available for this transaction.</p>}</section>
-        <section className="detail-summary"><h3>Order summary</h3><div><p><span>Subtotal</span><b>{peso(order.subtotal)}</b></p>{hasDiscount ? <><p><span>{order.discountType || 'Discount'}</span><b>-{peso(order.discountAmount)}</b></p>{order.discountCustomerName ? <p><span>Discount name</span><b>{order.discountCustomerName}</b></p> : null}{order.discountIdNumber ? <p><span>Discount ID</span><b>{order.discountIdNumber}</b></p> : null}</> : <p><span>Discount</span><b>No discount</b></p>}</div></section>
+        <section className="detail-summary"><h3>Order summary</h3><div><CashierBreakdownRows breakdown={breakdown} vatRate={vatRate} pricesIncludeVat={pricesIncludeVat} />{hasDiscount ? <>{order.discountCustomerName ? <p><span>Discount name</span><b>{order.discountCustomerName}</b></p> : null}{order.discountIdNumber ? <p><span>Discount ID</span><b>{order.discountIdNumber}</b></p> : null}</> : <p><span>Discount</span><b>No discount</b></p>}</div></section>
         <div className="detail-total"><span>Total</span><strong>{peso(order.total)}</strong></div>
       </div>
     </section>
@@ -985,8 +1075,12 @@ function receiptPaymentRows(order) {
 }
 
 function CashierReceipt({ order, onClose }) {
+  const { pricing } = usePricing()
   const itemCount = (order.items || []).reduce((sum, item) => sum + Number(item.qty || item.quantity || 0), 0)
   const cashierName = order.cashierName || 'Cashier'
+  const vatRate = order.vatRate ?? pricing.vatRate
+  const pricesIncludeVat = order.pricesIncludeVat ?? pricing.pricesIncludeVat
+  const breakdown = storedOrderVatBreakdown(order, vatRate, pricesIncludeVat)
   return <div className="cashier-receipt-backdrop">
     <section className="cashier-receipt-modal" role="dialog" aria-modal="true" aria-label="Receipt preview">
       <header className="cashier-receipt-modal-head">
@@ -1022,12 +1116,11 @@ function CashierReceipt({ order, onClose }) {
             })}
           </div>
           <div className="receipt-line" />
-          <div className="receipt-total-row"><span>Subtotal:</span><span>{Number(order.subtotal || 0).toFixed(2)}</span></div>
-          {Number(order.discountAmount || 0) > 0 ? <div className="receipt-total-row"><span>{order.discountType || 'Discount'}:</span><span>-{Number(order.discountAmount || 0).toFixed(2)}</span></div> : null}
+          {breakdown.isVatExemptDiscount ? <>{breakdown.regularBaseAmount > 0 ? <div className="receipt-total-row"><span>VATable Sale:</span><span>{breakdown.regularBaseAmount.toFixed(2)}</span></div> : null}<div className="receipt-total-row"><span>VAT-Exempt Sale:</span><span>{breakdown.vatExemptSale.toFixed(2)}</span></div><div className="receipt-total-row"><span>{formatVatRate(vatRate)} VAT:</span><span>{breakdown.regularVatAmount.toFixed(2)}</span></div><div className="receipt-total-row"><span>Less 20% SC/PWD Disc.:</span><span>-{breakdown.discountAmount.toFixed(2)}</span></div></> : <><div className="receipt-total-row"><span>Subtotal:</span><span>{breakdown.baseAmount.toFixed(2)}</span></div><div className="receipt-total-row"><span>VAT ({formatVatRate(vatRate)}):</span><span>{breakdown.vatAmount.toFixed(2)}</span></div></>}
           <div className="receipt-total-row"><span>TOTAL:</span><span className="receipt-grand-total">{Number(order.total || 0).toFixed(2)}</span></div>
           <div className="receipt-line" />
           <div className="receipt-row"><span className="receipt-label">Payment Method:</span><span className="receipt-value">{order.paymentMethod}</span></div>
-          {Number(order.discountAmount || 0) > 0 ? <div className="receipt-row"><span className="receipt-label">Discount ID:</span><span className="receipt-value">{order.discountIdNumber || 'N/A'}</span></div> : null}
+          {breakdown.isVatExemptDiscount ? <div className="receipt-row"><span className="receipt-label">Discount ID:</span><span className="receipt-value">{order.discountIdNumber || 'N/A'}</span></div> : null}
           {receiptPaymentRows(order).map(([label, value]) => <div className="receipt-row" key={label}><span className="receipt-label">{label}:</span><span className="receipt-value">{value}</span></div>)}
           <div className="receipt-line" />
           <div className="receipt-row"><span className="receipt-label">Items:</span><span className="receipt-value">{itemCount}</span></div>

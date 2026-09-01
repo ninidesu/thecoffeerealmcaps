@@ -36,6 +36,7 @@ const TREND_METRICS = [
   { key: 'orders', label: 'Orders', detail: 'Completed paid orders', icon: ShoppingBag, format: (value) => Math.round(value).toLocaleString('en-PH'), previousKey: 'previousOrders' },
   { key: 'units', label: 'Units', detail: 'Items sold', icon: Boxes, format: (value) => Math.round(value).toLocaleString('en-PH'), previousKey: 'previousUnits' },
 ]
+const SALES_GRAPH_DURATION = 4
 
 function AnimatedValue({ value, format }) {
   return <>{format ? format(value) : Math.round(value).toLocaleString('en-PH')}</>
@@ -103,6 +104,34 @@ function reviveAppliedFilters(value) {
 function periodLabel(applied) {
   const fmt = new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
   return `${fmt.format(applied.from)} - ${fmt.format(applied.to)}`
+}
+
+function chartEaseTimelinePosition(progress) {
+  const easedProgress = Math.min(1, Math.max(0, progress))
+  const parameter = 1 - Math.cbrt(1 - easedProgress)
+  const inverse = 1 - parameter
+  return 3 * inverse ** 2 * parameter * 0.16 + 3 * inverse * parameter ** 2 * 0.3 + parameter ** 3
+}
+
+function smoothLinePath(points) {
+  if (!points.length) return ''
+  if (points.length < 2) return `M ${points[0][0]} ${points[0][1]}`
+
+  let path = `M ${points[0][0]} ${points[0][1]}`
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const previous = points[Math.max(0, index - 1)]
+    const current = points[index]
+    const nextPoint = points[index + 1]
+    const next = points[Math.min(points.length - 1, index + 2)]
+    const segmentTop = Math.min(current[1], nextPoint[1])
+    const segmentBottom = Math.max(current[1], nextPoint[1])
+    const controlOneX = current[0] + (nextPoint[0] - previous[0]) / 6
+    const controlOneY = Math.min(segmentBottom, Math.max(segmentTop, current[1] + (nextPoint[1] - previous[1]) / 6))
+    const controlTwoX = nextPoint[0] - (next[0] - current[0]) / 6
+    const controlTwoY = Math.min(segmentBottom, Math.max(segmentTop, nextPoint[1] - (next[1] - current[1]) / 6))
+    path += ` C ${controlOneX} ${controlOneY}, ${controlTwoX} ${controlTwoY}, ${nextPoint[0]} ${nextPoint[1]}`
+  }
+  return path
 }
 
 export default function SalesReportPage() {
@@ -934,14 +963,14 @@ function TrendChart({ trend }) {
   const y = (value) => H - 26 - (value / max) * (H - 48)
 
   const currentPoints = trend.map((point, index) => [x(index), y(point.revenue)])
-  const linePath = currentPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${point[0]},${point[1]}`).join(' ')
+  const linePath = smoothLinePath(currentPoints)
   const areaPath = `${linePath} L${currentPoints[currentPoints.length - 1][0]},${H - 22} L${currentPoints[0][0]},${H - 22} Z`
 
   const previousPoints = trend.filter((point) => point.previousRevenue != null)
-  const prevPath = trend.map((point, index) => point.previousRevenue == null ? null : `${x(index)},${y(point.previousRevenue)}`)
+  const previousCoordinates = trend
+    .map((point, index) => point.previousRevenue == null ? null : [x(index), y(point.previousRevenue)])
     .filter(Boolean)
-    .map((coords, index) => `${index === 0 ? 'M' : 'L'}${coords}`)
-    .join(' ')
+  const prevPath = smoothLinePath(previousCoordinates)
 
   const hovered = hoverIndex != null ? trend[hoverIndex] : null
   const labelStep = Math.max(1, Math.ceil(trend.length / 8))
@@ -950,21 +979,32 @@ function TrendChart({ trend }) {
   return (
     <div className={`srp-trend-chart ${hovered ? 'is-hovering' : ''}`}>
       <svg key={chartKey} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-labelledby="sales-trend-title sales-trend-description">
-        <title id="sales-trend-title">Net revenue trend</title>
-        <desc id="sales-trend-description">Current period net revenue is shown with a solid line. The previous period is shown with a dashed line.</desc>
-        {[0.25, 0.5, 0.75].map((f) => <line key={f} x1={PAD} x2={W - PAD} y1={y(max * f)} y2={y(max * f)} className="srp-grid-line" />)}
-        {hovered && <line x1={x(hoverIndex)} x2={x(hoverIndex)} y1={12} y2={H - 22} className="dash-hover-guide" />}
-        {previousPoints.length > 1 && <path d={prevPath} fill="none" className="srp-prev-line srp-animated-path" />}
-        <path d={areaPath} fill="url(#srpFade)" className="srp-current-area" />
-        <path d={linePath} fill="none" pathLength="1" className="srp-current-line srp-animated-path" />
         <defs>
           <linearGradient id="srpFade" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="#2f5c46" stopOpacity=".24" />
             <stop offset="1" stopColor="#2f5c46" stopOpacity="0" />
           </linearGradient>
+          <clipPath id="srpSalesRevealClip">
+            <rect
+              key={`srp-clip-${chartKey}`}
+              className="srp-sales-line-clip"
+              x={PAD - 6}
+              y="0"
+              width={W - PAD * 2 + 12}
+              height={H}
+              style={{ animationDuration: `${SALES_GRAPH_DURATION}s` }}
+            />
+          </clipPath>
         </defs>
+        <title id="sales-trend-title">Net revenue trend</title>
+        <desc id="sales-trend-description">Current period net revenue is shown with a solid line. The previous period is shown with a dashed line.</desc>
+        {[0.25, 0.5, 0.75].map((f) => <line key={f} x1={PAD} x2={W - PAD} y1={y(max * f)} y2={y(max * f)} className="srp-grid-line" />)}
+        {hovered && <line x1={x(hoverIndex)} x2={x(hoverIndex)} y1={12} y2={H - 22} className="dash-hover-guide" />}
+        {previousPoints.length > 1 && <path d={prevPath} fill="none" clipPath="url(#srpSalesRevealClip)" className="srp-prev-line" />}
+        <path d={areaPath} fill="url(#srpFade)" clipPath="url(#srpSalesRevealClip)" className="srp-current-area" />
+        <path d={linePath} fill="none" clipPath="url(#srpSalesRevealClip)" className="srp-current-line" vectorEffect="non-scaling-stroke" />
         {trend.map((point, index) => (
-          <g key={point.key} className="srp-chart-point" style={{ '--srp-point-delay': `${Math.min(index, 8) * 55 + 120}ms` }}>
+          <g key={point.key} className="srp-chart-point" style={{ '--srp-point-delay': `${chartEaseTimelinePosition(index / Math.max(1, trend.length - 1)) * SALES_GRAPH_DURATION}s` }}>
             <circle cx={x(index)} cy={y(point.revenue)} r={hoverIndex === index ? 5.5 : 3.5} className={`srp-dot ${hoverIndex === index ? 'is-active' : ''}`} />
             <circle cx={x(index)} cy={y(point.revenue)} r="22" fill="transparent" tabIndex={0} role="img"
               aria-label={`${point.label}: ${money(point.revenue)}, ${point.orders} order${point.orders === 1 ? '' : 's'}${point.previousRevenue != null ? `, previous period ${money(point.previousRevenue)}` : ''}`}

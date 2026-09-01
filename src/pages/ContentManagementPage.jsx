@@ -122,7 +122,7 @@ export default function ContentManagementPage() {
               <div className="ac-choice-heading"><div><b>Menu selection</b><span>{selectedMenu.size} of 6 selected</span></div></div>
               <div className="ac-menu-picker">{menu.map((item) => <button type="button" key={item.id} className={selectedMenu.has(String(item.id)) ? 'is-selected' : ''} onClick={() => toggleFeatured(item.id)} disabled={!selectedMenu.has(String(item.id)) && selectedMenu.size >= 6}>
                 <span className="ac-menu-thumb">{item.image_url ? <img src={item.image_url.startsWith('/') || /^https?:\/\//i.test(item.image_url) ? item.image_url : `/${item.image_url}`} alt=""/> : <Sparkles size={18}/>}</span>
-                <span><b>{item.name}</b><small>{item.category} · PHP {Number(item.price).toFixed(0)}</small></span><i>{selectedMenu.has(String(item.id)) && <Check size={15}/>}</i>
+                <span><b>{item.name}</b><small>{item.category} · PHP {Number(item.price).toFixed(0)} incl. VAT</small></span><i>{selectedMenu.has(String(item.id)) && <Check size={15}/>}</i>
               </button>)}</div>
             </EditorSection>}
 

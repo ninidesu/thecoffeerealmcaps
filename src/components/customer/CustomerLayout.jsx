@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react'
 import Brand from '../Brand'
 import { useAuth } from '../../context/AuthContext'
 import { useCart } from '../../context/CartContext'
+import { usePricing } from '../../context/usePricing'
 import { isCustomerRole } from '../../lib/auth'
 import LogoutConfirmModal from '../auth/LogoutConfirmModal'
+import { formatVatRate, vatBreakdownFromInclusiveAmount } from '../../utils/pricing'
 
 const centerLinks = [['Menu', '/menu'], ['My Orders', '/orders'], ['Help', '/help'], ['Settings', '/settings']]
 const money = (value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value)
@@ -115,6 +117,8 @@ export default function CustomerLayout() {
 
 function CartDrawer({ cart, user }) {
   const [confirmClear, setConfirmClear] = useState(false)
+  const { pricing } = usePricing()
+  const { baseAmount, vatAmount } = vatBreakdownFromInclusiveAmount(cart.subtotal, pricing.vatRate, pricing.pricesIncludeVat)
   const clear = () => { cart.clearCart(); setConfirmClear(false) }
 
   return (
@@ -164,7 +168,8 @@ function CartDrawer({ cart, user }) {
         </div>
         {cart.items.length > 0 && (
           <footer>
-            <div><span>Subtotal</span><b>{money(cart.subtotal)}</b></div>
+            <div><span>Subtotal</span><b>{money(baseAmount)}</b></div>
+            <div className="customer-vat-row"><span>{pricing.pricesIncludeVat ? `VAT included (${formatVatRate(pricing.vatRate)})` : 'VAT calculated at checkout'}</span><b>{money(vatAmount)}</b></div>
             <p>Delivery fees and discounts are calculated during checkout.</p>
             <Link className="primary-button" to={user ? '/checkout' : '/login'} state={user ? undefined : { from: '/checkout' }} onClick={cart.closeCart}>Proceed to checkout</Link>
             <button className="drawer-clear" type="button" onClick={() => setConfirmClear(true)}><Trash2 />Clear cart</button>

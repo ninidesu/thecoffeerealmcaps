@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { DEFAULT_PRICING } from '../utils/pricing'
 
 export const CONTENT_DEFAULTS = {
   hero: {
@@ -41,6 +42,7 @@ export const SYSTEM_DEFAULTS = {
     bankName: '', bankAccountName: '', bankAccountNumber: '', bankInstructions: 'Transfer the exact order total and save a clear receipt.',
   },
   notices: { checkoutNotice: '', inquiryReplyTarget: '' },
+  pricing: { ...DEFAULT_PRICING },
 }
 
 export const DEFAULT_TESTIMONIALS = [

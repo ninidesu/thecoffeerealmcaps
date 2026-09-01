@@ -6739,3 +6739,106 @@ html[data-theme] .cashier-v2 .customize-add-button {
     grid-row: 2 !important;
   }
 }
+
+/* Keep the transactions pagination footer on the dark cashier surface. */
+html[data-theme='dark'] .cashier-v2 .transaction-pagination {
+  border-top-color: var(--cashier-line) !important;
+  background: var(--cashier-modal-header) !important;
+  color: var(--cashier-muted) !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .transaction-pagination span {
+  color: var(--cashier-muted) !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .transaction-pagination button:not(:disabled):not(.active) {
+  border-color: var(--cashier-line) !important;
+  background: var(--cashier-button-surface) !important;
+  color: var(--ink) !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .transaction-pagination button:not(:disabled):not(.active):hover {
+  border-color: var(--accent) !important;
+  background: var(--cashier-button-hover) !important;
+  color: var(--ink) !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .transaction-pagination button.active {
+  border-color: var(--accent) !important;
+  background: var(--brand) !important;
+  color: var(--ink) !important;
+}
+
+/* Keep the details actions distinct: a full-width text action and a compact close control. */
+.cashier-v2 .transaction-details-modal > header {
+  min-width: 0;
+}
+
+.cashier-v2 .transaction-details-modal > header > div:first-child {
+  min-width: 0;
+}
+
+.cashier-v2 .transaction-details-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cashier-v2 .transaction-details-modal > header .transaction-details-head-actions button:first-child {
+  display: inline-flex !important;
+  width: auto !important;
+  min-width: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px !important;
+  border-radius: 10px;
+  font-size: 0.76rem !important;
+  line-height: 1.2 !important;
+  white-space: nowrap;
+}
+
+.cashier-v2 .transaction-details-modal > header .transaction-details-head-actions button:last-child {
+  display: grid !important;
+  flex: 0 0 44px !important;
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  place-items: center;
+  padding: 0 !important;
+  font-size: 1.4rem !important;
+  line-height: 1 !important;
+}
+
+@media (max-width: 560px) {
+  .cashier-v2 .transaction-details-modal > header {
+    flex-wrap: wrap;
+  }
+
+  .cashier-v2 .transaction-details-modal > header > div:first-child {
+    flex: 1 1 140px;
+  }
+
+  .cashier-v2 .transaction-details-head-actions {
+    flex: 1 1 100%;
+    justify-content: stretch;
+  }
+
+  .cashier-v2 .transaction-details-modal > header .transaction-details-head-actions button:first-child {
+    flex: 1 1 auto;
+    padding-right: 10px !important;
+    padding-left: 10px !important;
+  }
+}
+
+/* Keep transaction detail totals clean and free of row separators. */
+.cashier-v2 .transaction-details-modal .detail-summary > div,
+.cashier-v2 .transaction-details-modal .detail-summary p,
+.cashier-v2 .transaction-details-modal .detail-total {
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+}

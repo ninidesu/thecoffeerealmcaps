@@ -3,9 +3,9 @@ import { supabase } from '../lib/supabase'
 const FETCH_CAP = 5000
 
 const REPORT_SELECT = `id,order_number,receipt_number,order_type,order_source,status,customer_id,customer_name,customer_email,customer_phone,
-  subtotal,discount_amount,delivery_fee,final_total,payment_status,cancellation_status,cancellation_requested_at,cancellation_requested_by_role,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
+  subtotal,discount_type,discount_subtotal,discount_amount,vat_exempt_amount,delivery_fee,final_total,payment_status,cancellation_status,cancellation_requested_at,cancellation_requested_by_role,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
   refund_status,is_voided,voided_reason,voided_at,cashier_id,created_at,updated_at,
-  order_items(id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),
+  order_items(id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations,is_discounted,discount_amount,vat_exempt_amount),
   payments(id,method,status,reference_number,amount_due,amount_received,change_amount,paid_at,confirmed_at),
   refunds(id,refund_amount,original_amount,refund_status,refund_reason,refund_method,reference_number,requested_at,processed_at)`
 
@@ -104,7 +104,10 @@ function normalize(row, staffNames = {}, cancellationByOrder = {}) {
     customerPhone: row.customer_phone || '',
     originalAmount: Number(row.final_total || 0),
     subtotal: Number(row.subtotal || 0),
+    discountType: row.discount_type || '',
+    discountSubtotal: Number(row.discount_subtotal || 0),
     discountAmount: Number(row.discount_amount || 0),
+    vatExemptAmount: Number(row.vat_exempt_amount || 0),
     deliveryFee: Number(row.delivery_fee || 0),
     paymentMethod: payment?.method || 'other',
     paymentStatus: payment?.status || row.payment_status || 'unpaid',
@@ -135,6 +138,9 @@ function normalize(row, staffNames = {}, cancellationByOrder = {}) {
       lineTotal: Number(item.line_total || 0),
       addons: item.addons || [],
       customizations: item.customizations || {},
+      isDiscounted: Boolean(item.is_discounted),
+      discountAmount: Number(item.discount_amount || 0),
+      vatExemptAmount: Number(item.vat_exempt_amount || 0),
     })),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

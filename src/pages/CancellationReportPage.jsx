@@ -6,8 +6,10 @@ import {
   RotateCcw, Search, ShieldAlert, SlidersHorizontal, Undo2, UserRound, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
+import { usePricing } from '../context/usePricing'
 import { describeError } from '../utils/describeError'
 import { money } from '../utils/money'
+import { buildVatExemptOrderBreakdown, formatVatRate } from '../utils/pricing'
 import {
   buildCancellationTrend, computeCancellationSummary, exportCancellationReportToPdf,
   exportCancellationReportToXlsx, fetchCancellationReportRecords, filterByDateRange,
@@ -220,6 +222,7 @@ function formatOptionSummary(value) {
 }
 
 function RecordDrawer({ record, onClose, view }) {
+  const { pricing } = usePricing()
   useEffect(() => {
     const onKeyDown = (event) => { if (event.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKeyDown)
@@ -234,6 +237,7 @@ function RecordDrawer({ record, onClose, view }) {
       refund.processedAt && { title: 'Refund completed', date: refund.processedAt, text: refund.referenceNumber ? `Reference ${refund.referenceNumber}` : money(refund.amount) },
     ]),
   ].filter(Boolean).sort((a, b) => new Date(a.date) - new Date(b.date))
+  const breakdown = buildVatExemptOrderBreakdown({ subtotal: record.subtotal, discountSubtotal: record.discountSubtotal, discountType: record.discountType, discountAmount: record.discountAmount, vatExemptAmount: record.vatExemptAmount, vatRate: pricing.vatRate, pricesIncludeVat: pricing.pricesIncludeVat })
 
   return <div className="ops-drawer-backdrop cancel-drawer-backdrop" onMouseDown={onClose}>
     <aside className="ops-drawer txn-drawer cancel-drawer" role="dialog" aria-modal="true" aria-label={`${view === 'refunds' ? 'Refund' : 'Cancellation'} record ${record.orderNumber}`} onMouseDown={(event) => event.stopPropagation()}>
@@ -256,7 +260,7 @@ function RecordDrawer({ record, onClose, view }) {
           const options = [formatOptionSummary(item.customizations), formatOptionSummary(item.addons)].filter(Boolean).join(' · ')
           return <li key={item.id}><div><span>{item.quantity}× {item.name}</span><b>{money(item.lineTotal)}</b></div>{options && <small>{options}</small>}<small>Original unit price: {money(item.unitPrice)}</small></li>
         })}</ul> : <CompactEmpty text="No stored item snapshots are available." />}</section>
-        <section><h3>Amount breakdown</h3><div className="cancel-amount-list"><p><span>Subtotal</span><b>{money(record.subtotal)}</b></p><p><span>Discount</span><b>- {money(record.discountAmount)}</b></p><p><span>Delivery fee</span><b>{money(record.deliveryFee)}</b></p><p className="total"><span>Original total</span><b>{money(record.originalAmount)}</b></p><p className="refund"><span>Refunded</span><b>{money(record.refundAmount)}</b></p></div></section>
+        <section><h3>Amount breakdown</h3><div className="cancel-amount-list">{breakdown.isVatExemptDiscount?<>{breakdown.regularBaseAmount>0&&<p><span>VATable Sale</span><b>{money(breakdown.regularBaseAmount)}</b></p>}<p><span>VAT-Exempt Sale</span><b>{money(breakdown.vatExemptSale)}</b></p><p><span>{formatVatRate(pricing.vatRate)} VAT</span><b>{money(breakdown.regularVatAmount)}</b></p><p><span>Less 20% SC/PWD Disc.</span><b>- {money(breakdown.discountAmount)}</b></p></>:<><p><span>Subtotal</span><b>{money(breakdown.baseAmount)}</b></p><p><span>{pricing.pricesIncludeVat ? `VAT included (${formatVatRate(pricing.vatRate)})` : 'VAT calculated at checkout'}</span><b>{money(breakdown.vatAmount)}</b></p>{record.discountAmount>0&&<p><span>Discount</span><b>- {money(record.discountAmount)}</b></p>}</>}<p><span>Delivery fee</span><b>{money(record.deliveryFee)}</b></p><p className="total"><span>Original total</span><b>{money(record.originalAmount)}</b></p><p className="refund"><span>Refunded</span><b>{money(record.refundAmount)}</b></p></div></section>
         <section><h3>Order and payment timeline</h3><ol className="txn-timeline">{timeline.map((item, index) => <li key={`${item.title}-${index}`}><span>{index === timeline.length - 1 ? <CheckCircle2 size={16} /> : <CalendarDays size={16} />}</span><div><b>{item.title}</b><small>{formatDateTime(item.date)}</small><p>{item.text}</p></div></li>)}</ol></section>
       </div>
     </aside>

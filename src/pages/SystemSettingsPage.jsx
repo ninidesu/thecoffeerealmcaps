@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Clock3, CreditCard, Database, Image, Info, MapPin, RotateCcw, Save, ShieldCheck, ShoppingBag, Store, Upload } from 'lucide-react'
+import { AlertTriangle, Check, Clock3, CreditCard, Database, Image, Info, MapPin, Percent, RotateCcw, Save, ShieldCheck, ShoppingBag, Store, Upload } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import AppShell from '../components/AppShell'
 import { describeError } from '../utils/describeError'
@@ -12,6 +12,7 @@ const SECTIONS = [
   ['ordering', 'Hours & ordering', Clock3, 'Availability and fulfillment'],
   ['delivery', 'Delivery zones', MapPin, 'Fees and estimates'],
   ['payments', 'Payments', CreditCard, 'Methods and instructions'],
+  ['pricing', 'Pricing & VAT', Percent, 'Global price treatment'],
   ['security', 'Platform security', ShieldCheck, 'Access and safeguards'],
 ]
 
@@ -112,6 +113,16 @@ export default function SystemSettingsPage() {
               <div className="ac-subsection"><h3>Cash on delivery</h3><div className="ac-form-grid"><Field label="Maximum order total (PHP)" hint="Orders above this amount must use a digital method."><input type="number" min="0" step="1" value={settings.payments.codMaximum} onChange={(event) => update('payments', { codMaximum: Number(event.target.value) })}/></Field></div></div>
               <div className="ac-subsection"><h3>GCash</h3><QrAssetEditor label="GCash payment QR" currentUrl={settings.payments.gcashQrUrl} file={qrFiles.gcash} onChange={(file) => setQrFiles((current) => ({ ...current, gcash: file }))} onError={setError}/><div className="ac-form-grid"><Field label="Customer instructions" wide><textarea rows="3" value={settings.payments.gcashInstructions} onChange={(event) => update('payments', { gcashInstructions: event.target.value })}/></Field></div></div>
               <div className="ac-subsection"><h3>Bank transfer</h3><QrAssetEditor label="Bank transfer QR" currentUrl={settings.payments.bankQrUrl} file={qrFiles.bank_transfer} onChange={(file) => setQrFiles((current) => ({ ...current, bank_transfer: file }))} onError={setError}/><div className="ac-form-grid"><Field label="Bank name"><input value={settings.payments.bankName} onChange={(event) => update('payments', { bankName: event.target.value })}/></Field><Field label="Account name"><input value={settings.payments.bankAccountName} onChange={(event) => update('payments', { bankAccountName: event.target.value })}/></Field><Field label="Account number"><input value={settings.payments.bankAccountNumber} onChange={(event) => update('payments', { bankAccountNumber: event.target.value })}/></Field><Field label="Customer instructions" wide><textarea rows="3" value={settings.payments.bankInstructions} onChange={(event) => update('payments', { bankInstructions: event.target.value })}/></Field></div></div>
+            </SettingsSection>}
+
+            {section === 'pricing' && <SettingsSection title="Pricing & VAT" description="One global policy applies to customers, cashiers, staff, reports, receipts, and new orders." onSave={() => save('pricing')} saving={saving}>
+              <div className="ac-alert" role="status"><Info size={18}/><div><b>Current catalog prices are already VAT-inclusive</b><span>The system will not multiply or change the amounts already stored for menu items, variants, or add-ons.</span></div></div>
+              <div className="ac-form-grid">
+                <Field label="VAT rate" hint="The current store-wide rate used for order records."><input readOnly value={`${Math.round(Number(settings.pricing?.vatRate ?? 0.12) * 100)}%`}/></Field>
+                <Field label="Price treatment" hint="This policy is shared by every user and channel."><input readOnly value={settings.pricing?.pricesIncludeVat !== false ? 'Prices include VAT' : 'VAT calculated at checkout'}/></Field>
+                <Field label="Currency"><input readOnly value={settings.pricing?.currency || 'PHP'}/></Field>
+              </div>
+              <div className="ac-subsection"><h3>Visible to everyone</h3><p>Customers see the policy during browsing and checkout. Cashiers, staff, and administrators see the same notice in their work areas. New orders store the active VAT-inclusive policy for consistent records and reporting.</p></div>
             </SettingsSection>}
 
             {section === 'security' && <section className="ac-editor-section"><header><div><h2>Platform security</h2><p>Security controls are shown where they are actually managed.</p></div></header><div className="ac-security-grid">

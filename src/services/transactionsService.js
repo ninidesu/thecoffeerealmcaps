@@ -2,10 +2,10 @@ import { supabase } from '../lib/supabase'
 import { dispatchOrderEmails } from './orderEmailService'
 
 const LIST_SELECT = `id,order_number,receipt_number,order_type,order_source,status,customer_id,customer_name,customer_email,customer_phone,
-  delivery_address,schedule_date,schedule_time,subtotal,discount_type,discount_amount,delivery_fee,final_total,
+  delivery_address,schedule_date,schedule_time,subtotal,discount_type,discount_subtotal,discount_amount,delivery_fee,final_total,vat_rate,prices_include_vat,
   payment_status,payment_confirmed,payment_proof_path,cancellation_status,fulfillment_hold,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
   refund_status,is_voided,voided_reason,voided_at,cashier_id,created_at,updated_at,
-  order_items(id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),
+  order_items(id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations,is_discounted,discount_amount),
   payments!inner(id,method,status,amount_due,amount_received,change_amount,reference_number,account_number,bank_name,paid_at,confirmed_at),
   refunds(id,refund_amount,original_amount,refund_status,refund_reason,refund_method,reference_number,requested_at,processed_at)`
 
@@ -14,10 +14,10 @@ const SUMMARY_SELECT = `id,order_type,order_source,status,customer_id,final_tota
   refunds(refund_amount,refund_status)`
 
 const DETAIL_SELECT = `id,order_number,receipt_number,order_type,order_source,status,customer_id,customer_name,customer_email,customer_phone,
-  delivery_address,schedule_date,schedule_time,subtotal,discount_type,discount_amount,delivery_fee,final_total,
+  delivery_address,schedule_date,schedule_time,subtotal,discount_type,discount_subtotal,discount_amount,delivery_fee,final_total,vat_rate,prices_include_vat,
   payment_status,payment_confirmed,payment_proof_path,cancellation_status,fulfillment_hold,cancellation_reason,cancellation_notes,cancelled_by_role,cancelled_at,
   refund_status,is_voided,voided_reason,voided_at,cashier_id,created_at,updated_at,
-  order_items(id,menu_item_id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations),
+  order_items(id,menu_item_id,item_name,display_name,unit_price,quantity,addons_total,line_total,addons,customizations,is_discounted,discount_amount),
   payments!inner(id,method,status,amount_due,amount_received,change_amount,reference_number,account_number,bank_name,paid_at,confirmed_at),
   refunds(id,refund_amount,original_amount,refund_status,refund_reason,refund_method,reference_number,requested_at,processed_at)`
 
@@ -48,9 +48,12 @@ function normalize(row, cashierNames = {}) {
     scheduleTime: row.schedule_time,
     subtotal: Number(row.subtotal || 0),
     discountType: row.discount_type,
+    discountSubtotal: Number(row.discount_subtotal || 0),
     discountAmount: Number(row.discount_amount || 0),
     deliveryFee: Number(row.delivery_fee || 0),
     finalTotal: Number(row.final_total || 0),
+    vatRate: row.vat_rate == null ? null : Number(row.vat_rate),
+    pricesIncludeVat: row.prices_include_vat == null ? null : Boolean(row.prices_include_vat),
     paymentStatus: row.payment_status,
     paymentRecordStatus: payment?.status || row.payment_status || '',
     paymentConfirmed: Boolean(row.payment_confirmed),
@@ -92,6 +95,8 @@ function normalize(row, cashierNames = {}) {
       quantity: Number(item.quantity || 0),
       addonsTotal: Number(item.addons_total || 0),
       lineTotal: Number(item.line_total || 0),
+      discountAmount: Number(item.discount_amount || 0),
+      isDiscounted: Boolean(item.is_discounted),
       addons: item.addons || [],
       customizations: item.customizations || {},
     })),

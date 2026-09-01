@@ -250,6 +250,19 @@ function nextBucket(date, granularity) {
   return d
 }
 
+function trendBucketStart(date, granularity) {
+  if (granularity === 'week') return weekStart(date)
+  if (granularity === 'month') return monthStart(date)
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function previousTrendBucketStart(from, to, granularity) {
+  const rangeLength = Math.max(1, to.getTime() - from.getTime() + 1)
+  return trendBucketStart(new Date(from.getTime() - rangeLength), granularity)
+}
+
 function bucketLabel(key, granularity) {
   const date = new Date(`${key}T00:00:00`)
   if (granularity === 'month') return new Intl.DateTimeFormat('en-PH', { month: 'short', year: 'numeric' }).format(date)
@@ -277,31 +290,19 @@ export function buildTrend(orders, previousOrders, { dateFrom, dateTo, granulari
     totalsByBucket.set(key, entry)
   })
 
-  // Align previous-period orders bucket-by-bucket so both lines share an axis.
-  const previousTotals = []
-  if (previousOrders.length) {
-    const prevByBucket = new Map()
-    previousOrders.filter(isRevenueOrder).forEach((order) => {
-      const key = bucketKey(new Date(order.createdAt), granularity)
-      prevByBucket.set(key, (prevByBucket.get(key) || 0) + order.netRevenue - order.refundedAmount)
-    })
-    const prevKeys = [...prevByBucket.keys()].sort()
-    if (prevKeys.length) {
-      let cursor = new Date(`${prevKeys[0]}T00:00:00`)
-      const lastKey = prevKeys[prevKeys.length - 1]
-      let guard = 0
-      while (isoDay(cursor) <= lastKey && guard < MAX_TREND_BUCKETS) {
-        previousTotals.push(prevByBucket.get(bucketKey(cursor, granularity)) || 0)
-        cursor = nextBucket(cursor, granularity)
-        guard += 1
-      }
-    }
-  }
+  // Align the previous period to the full comparison range, including empty
+  // buckets, so both lines stay on the same chart positions.
+  const previousByBucket = new Map()
+  previousOrders.filter(isRevenueOrder).forEach((order) => {
+    const key = bucketKey(new Date(order.createdAt), granularity)
+    previousByBucket.set(key, (previousByBucket.get(key) || 0) + order.netRevenue - order.refundedAmount)
+  })
+  const hasPreviousData = previousByBucket.size > 0
 
   const points = []
   let cursor = granularity === 'week' ? weekStart(from) : granularity === 'month' ? monthStart(from) : new Date(from)
   cursor.setHours(0, 0, 0, 0)
-  let index = 0
+  let previousCursor = previousTrendBucketStart(from, to, granularity)
   while (cursor <= to && points.length < MAX_TREND_BUCKETS) {
     const key = bucketKey(cursor, granularity)
     const entry = totalsByBucket.get(key) || { revenue: 0, orders: 0 }
@@ -310,10 +311,10 @@ export function buildTrend(orders, previousOrders, { dateFrom, dateTo, granulari
       label: bucketLabel(key, granularity),
       revenue: entry.revenue,
       orders: entry.orders,
-      previousRevenue: previousTotals[index] ?? null,
+      previousRevenue: hasPreviousData ? previousByBucket.get(bucketKey(previousCursor, granularity)) || 0 : null,
     })
     cursor = nextBucket(cursor, granularity)
-    index += 1
+    previousCursor = nextBucket(previousCursor, granularity)
   }
   return points
 }
@@ -337,35 +338,25 @@ function channelKeyForTrend(order) {
   return null
 }
 
-// Trend-only series with revenue, order, and unit metrics. The existing
-// buildTrend function remains unchanged for the Sales Reports view.
+// Trend-only series with revenue, order, and unit metrics. Both trend builders
+// use the same full-range previous-period alignment for consistent charts.
 export function buildTrendMetrics(orders, previousOrders, { dateFrom, dateTo, granularity = 'day' }) {
   const from = dateFrom ? new Date(dateFrom) : (orders.length ? new Date(orders[0].createdAt) : new Date())
   const to = dateTo ? new Date(dateTo) : new Date()
   const currentBuckets = aggregateTrendBuckets(orders, granularity)
   const previousBuckets = aggregateTrendBuckets(previousOrders, granularity)
-  const previousKeys = [...previousBuckets.keys()].sort()
-  const previousSeries = []
-
-  if (previousKeys.length) {
-    let previousCursor = new Date(`${previousKeys[0]}T00:00:00`)
-    const lastPreviousKey = previousKeys[previousKeys.length - 1]
-    let guard = 0
-    while (isoDay(previousCursor) <= lastPreviousKey && guard < MAX_TREND_BUCKETS) {
-      previousSeries.push(previousBuckets.get(bucketKey(previousCursor, granularity)) || { revenue: 0, orders: 0, units: 0 })
-      previousCursor = nextBucket(previousCursor, granularity)
-      guard += 1
-    }
-  }
+  const hasPreviousData = previousBuckets.size > 0
 
   const points = []
   let cursor = granularity === 'week' ? weekStart(from) : granularity === 'month' ? monthStart(from) : new Date(from)
   cursor.setHours(0, 0, 0, 0)
-  let index = 0
+  let previousCursor = previousTrendBucketStart(from, to, granularity)
   while (cursor <= to && points.length < MAX_TREND_BUCKETS) {
     const key = bucketKey(cursor, granularity)
     const entry = currentBuckets.get(key) || { revenue: 0, orders: 0, units: 0 }
-    const previous = previousSeries[index]
+    const previous = hasPreviousData
+      ? previousBuckets.get(bucketKey(previousCursor, granularity)) || { revenue: 0, orders: 0, units: 0 }
+      : null
     points.push({
       key,
       label: bucketLabel(key, granularity),
@@ -377,7 +368,7 @@ export function buildTrendMetrics(orders, previousOrders, { dateFrom, dateTo, gr
       previousUnits: previous ? previous.units : null,
     })
     cursor = nextBucket(cursor, granularity)
-    index += 1
+    previousCursor = nextBucket(previousCursor, granularity)
   }
   return points
 }
