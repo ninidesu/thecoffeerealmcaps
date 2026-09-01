@@ -2,6 +2,7 @@ import { AlertTriangle, Check, Clock3, CreditCard, Database, Image, Info, MapPin
 import { useCallback, useEffect, useState } from 'react'
 import AppShell from '../components/AppShell'
 import { describeError } from '../utils/describeError'
+import { IMAGE_UPLOAD_ACCEPT, validateImageFile } from '../utils/imageUpload'
 import {
   SYSTEM_DEFAULTS, fetchDeliveryZoneSettings, fetchPortalConfiguration,
   saveDeliveryZoneSettings, savePaymentConfiguration, savePortalConfiguration,
@@ -150,15 +151,19 @@ function QrAssetEditor({ label, currentUrl, file, onChange, onError }) {
     setPreviewUrl(objectUrl)
     return () => URL.revokeObjectURL(objectUrl)
   }, [file, currentUrl])
-  const choose = (event) => {
+  const choose = async (event) => {
     const next = event.target.files?.[0] || null
     if (!next) return
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(next.type)) { event.target.value = ''; onError('Upload a JPG, PNG, or WEBP QR image only.'); return }
-    if (next.size > 5 * 1024 * 1024) { event.target.value = ''; onError('The QR image must be 5 MB or smaller.'); return }
-    onError(''); onChange(next); event.target.value = ''
+    try {
+      await validateImageFile(next, { label: 'Payment QR image' })
+      onError(''); onChange(next)
+    } catch (error) {
+      onError(error.message || 'Could not use this image.')
+    }
+    event.target.value = ''
   }
   return <section className="ac-qr-editor" aria-label={label}>
     <div className="ac-qr-preview">{previewUrl ? <img src={previewUrl} alt={`${label} preview`}/> : <span><Image size={24}/><small>No QR uploaded</small></span>}<i>{file ? 'New preview' : 'Current QR'}</i></div>
-    <div className="ac-qr-copy"><b>{label}</b><p>{file ? `${file.name} is ready. Save Payments to publish this replacement.` : 'This is the QR customers currently see during checkout.'}</p><small>JPG, PNG or WEBP · Maximum 5 MB · A square, high-contrast image scans best.</small><div><label className="ac-secondary-button ac-file-button"><Upload size={16}/>{file ? 'Choose another' : 'Change QR'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={choose}/></label>{file && <button type="button" className="ac-text-button" onClick={() => onChange(null)}><RotateCcw size={15}/>Discard replacement</button>}</div></div>
+    <div className="ac-qr-copy"><b>{label}</b><p>{file ? `${file.name} is ready. Save Payments to publish this replacement.` : 'This is the QR customers currently see during checkout.'}</p><small>JPG, PNG or WEBP · Maximum 5 MB · A square, high-contrast image scans best.</small><div><label className="ac-secondary-button ac-file-button"><Upload size={16}/>{file ? 'Choose another' : 'Change QR'}<input type="file" accept={IMAGE_UPLOAD_ACCEPT} onChange={choose}/></label>{file && <button type="button" className="ac-text-button" onClick={() => onChange(null)}><RotateCcw size={15}/>Discard replacement</button>}</div></div>
   </section>
 }

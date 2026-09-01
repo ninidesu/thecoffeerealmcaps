@@ -68,7 +68,7 @@ function isCounted(order) {
   return order.status !== 'Cancelled' && !order.is_voided
 }
 function isPaidCompleted(order) {
-  return order.status === 'Completed' && order.payment_status === 'paid' && !order.is_voided
+  return ['Completed', 'Received'].includes(order.status) && order.payment_status === 'paid' && !order.is_voided
 }
 function salesOf(orders) {
   return orders.filter(isPaidCompleted).reduce((s, o) => s + Number(o.final_total || 0), 0)
@@ -91,7 +91,7 @@ export function computeDashboardMetrics(raw) {
   const salesChangePct = yesterdaySales > 0 ? ((totalSales - yesterdaySales) / yesterdaySales) * 100 : (totalSales > 0 ? 100 : 0)
 
   const totalOrders = countedToday.length
-  const completedOrders = todayOrders.filter((o) => o.status === 'Completed').length
+  const completedOrders = todayOrders.filter((o) => ['Completed', 'Received'].includes(o.status)).length
   const cancelledOrders = todayOrders.filter((o) => o.status === 'Cancelled').length
   const voidedOrders = todayOrders.filter((o) => o.is_voided).length
   const paidCompletedToday = todayOrders.filter(isPaidCompleted)
@@ -180,8 +180,8 @@ export function computeDashboardMetrics(raw) {
     else if (order.status === 'Preparing') orderStageCounts.preparing += 1
     else if (order.status === 'Ready for Pickup') orderStageCounts.ready += 1
     else if (order.status === 'Out for Delivery') orderStageCounts.delivery += 1
-    else if (order.status === 'Completed') orderStageCounts.completed += 1
-    if (order.schedule_date && order.schedule_time && !['Completed', 'Cancelled'].includes(order.status)) {
+    else if (['Completed', 'Received'].includes(order.status)) orderStageCounts.completed += 1
+    if (order.schedule_date && order.schedule_time && !['Completed', 'Received', 'Cancelled'].includes(order.status)) {
       const scheduled = new Date(`${order.schedule_date}T${order.schedule_time}`)
       if (!Number.isNaN(scheduled.getTime()) && scheduled < new Date()) orderStageCounts.overdue += 1
     }

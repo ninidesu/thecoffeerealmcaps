@@ -60,10 +60,15 @@ export const NOTIFICATION_STAFF_PREFERENCE_KEYS = [
   'system_error_popups',
 ]
 
+function normalizeStaffPreferences(preferences = {}) {
+  const merged = { ...DEFAULT_STAFF_PREFERENCES, ...preferences }
+  return { ...merged, order_queue: merged.order_queue === 'completed' ? 'completed' : 'active' }
+}
+
 function readCachedPreferences() {
   if (typeof window === 'undefined') return DEFAULT_STAFF_PREFERENCES
   try {
-    return { ...DEFAULT_STAFF_PREFERENCES, ...JSON.parse(window.localStorage.getItem(STAFF_PREFERENCES_CACHE_KEY) || '{}') }
+    return normalizeStaffPreferences(JSON.parse(window.localStorage.getItem(STAFF_PREFERENCES_CACHE_KEY) || '{}'))
   } catch {
     return DEFAULT_STAFF_PREFERENCES
   }
@@ -105,7 +110,7 @@ export function shouldShowSystemNotification(type) {
 
 export function subscribeToStaffPreferences(callback) {
   if (typeof window === 'undefined') return () => {}
-  const receive = (event) => callback({ ...DEFAULT_STAFF_PREFERENCES, ...(event.detail || {}) })
+  const receive = (event) => callback(normalizeStaffPreferences(event.detail || {}))
   window.addEventListener(STAFF_PREFERENCES_EVENT, receive)
   return () => window.removeEventListener(STAFF_PREFERENCES_EVENT, receive)
 }
@@ -143,7 +148,7 @@ export async function fetchStaffPreferences(userId) {
   }
   const { data, error } = await supabase.from('staff_preferences').select('*').eq('user_id', userId).maybeSingle()
   if (error) throw error
-  const preferences = { ...DEFAULT_STAFF_PREFERENCES, ...(data || {}) }
+  const preferences = normalizeStaffPreferences(data || {})
   cachePreferences(preferences)
   return preferences
 }
@@ -157,7 +162,7 @@ export async function saveStaffPreferences(userId, values, keys = Object.keys(DE
     .select()
     .single()
   if (error) throw error
-  cachePreferences({ ...DEFAULT_STAFF_PREFERENCES, ...data })
+  cachePreferences(normalizeStaffPreferences(data))
   return data
 }
 

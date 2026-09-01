@@ -26,7 +26,7 @@ import {
 } from '../services/staffSettingsService'
 import { useManagementSessionState } from '../hooks/useManagementSessionState'
 
-const ORDER_STATUS_OPTIONS = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Completed', 'Cancelled', 'Ordered']
+const ORDER_STATUS_OPTIONS = ['Order Received', 'Awaiting Payment Verification', 'Pending Confirmation', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Received', 'Completed', 'Cancelled', 'Ordered']
 const PAYMENT_METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', bank_transfer: 'Bank Transfer', cod: 'Cash on Delivery', other: 'Other' }
 const PAYMENT_STATUS_OPTIONS = [
   ['all', 'All payment states'],
@@ -148,7 +148,7 @@ function paymentStatusMeta(transaction) {
 }
 
 function statusTone(status) {
-  if (status === 'Completed') return 'completed'
+  if (['Completed', 'Received'].includes(status)) return 'completed'
   if (status === 'Cancelled') return 'cancelled'
   if (status === 'Preparing') return 'preparing'
   if (status === 'Ready for Pickup') return 'pickup'
@@ -159,7 +159,7 @@ function statusTone(status) {
 }
 
 function isCompletedSale(transaction) {
-  return transaction.status === 'Completed' && paymentStatusMeta(transaction).key === 'paid' && !transaction.isVoided
+  return ['Completed', 'Received'].includes(transaction.status) && paymentStatusMeta(transaction).key === 'paid' && !transaction.isVoided
 }
 
 function buildFilterLabel({ quickRange, dateFrom, dateTo }) {
@@ -1308,7 +1308,7 @@ function buildTimeline(transaction, audit) {
   if (transaction.status === 'Preparing') items.push({ label: 'Preparing', time: transaction.updatedAt, icon: <Clock3 size={14} /> })
   if (transaction.status === 'Ready for Pickup') items.push({ label: 'Ready for pickup', time: transaction.updatedAt, icon: <ShoppingBag size={14} /> })
   if (transaction.status === 'Out for Delivery') items.push({ label: 'Out for delivery', time: transaction.updatedAt, icon: <ShoppingBag size={14} /> })
-  if (transaction.status === 'Completed') items.push({ label: 'Completed', time: transaction.updatedAt, icon: <Check size={14} /> })
+  if (['Completed', 'Received'].includes(transaction.status)) items.push({ label: transaction.status, time: transaction.updatedAt, icon: <Check size={14} /> })
   if (transaction.cancelledAt) items.push({ label: 'Cancelled', time: transaction.cancelledAt, icon: <Ban size={14} />, detail: transaction.cancellationReason })
   if (transaction.voidedAt) items.push({ label: 'Voided', time: transaction.voidedAt, icon: <Ban size={14} />, detail: transaction.voidedReason })
   audit.filter((entry) => entry.action.startsWith('refund_')).forEach((entry) => {

@@ -9,7 +9,8 @@ import { isCustomerRole } from '../../lib/auth'
 import LogoutConfirmModal from '../auth/LogoutConfirmModal'
 import { formatVatRate, vatBreakdownFromInclusiveAmount } from '../../utils/pricing'
 
-const centerLinks = [['Menu', '/menu'], ['My Orders', '/orders'], ['Help', '/help'], ['Settings', '/settings']]
+const centerLinks = [['Menu', '/menu'], ['My Orders', '/orders'], ['Help', '/help'], ['Profile', '/profile']]
+const customerOnlyPaths = new Set(['/orders', '/profile'])
 const money = (value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value)
 
 export default function CustomerLayout() {
@@ -73,7 +74,7 @@ export default function CustomerLayout() {
         </button>
         <nav id="customer-navigation" className={open ? 'open' : ''}>
           <div className="customer-nav-center">
-            {centerLinks.map(([label, to]) => <NavLink key={to} to={to} onClick={close}>{label}</NavLink>)}
+            {centerLinks.filter(([,to])=>customerUser||!customerOnlyPaths.has(to)).map(([label, to]) => <NavLink key={to} to={to} onClick={close}>{label}</NavLink>)}
           </div>
           <div className="customer-nav-actions">
             <button className="nav-cart" type="button" onClick={() => { close(); cart.openCart() }} aria-haspopup="dialog">
@@ -149,17 +150,19 @@ function CartDrawer({ cart, user }) {
               <Link className="primary-button" to="/menu" onClick={cart.closeCart}>Browse menu</Link>
             </div>
           ) : cart.items.map((item) => (
-            <article className="drawer-cart-item" key={item.lineId}>
+            <article className={`drawer-cart-item${item.available===false?' is-unavailable':''}`} key={item.lineId}>
               <img src={item.image} alt="" />
               <div>
                 <h3>{item.name}</h3>
+                {item.available===false&&<span className="drawer-unavailable-badge">Unavailable</span>}
+                {item.available===false&&<p className="drawer-unavailable-reason">{item.availabilityReason||'Currently out of stock'}</p>}
                 <p>{[item.variation?.name, item.temperature, item.ice, item.sugar].filter(Boolean).join(' · ')}</p>
                 {item.addons?.length > 0 && <small>{item.addons.map((addon) => addon.name).join(', ')}</small>}
                 <strong>{money((item.unitPrice + (item.addons || []).reduce((sum, addon) => sum + addon.price, 0)) * item.quantity)}</strong>
                 <div className="drawer-item-actions">
-                  <button onClick={() => cart.updateQuantity(item.lineId, item.quantity - 1)} aria-label={`Decrease ${item.name}`}><Minus /></button>
+                  <button onClick={() => cart.updateQuantity(item.lineId, item.quantity - 1)} aria-label={`Decrease ${item.name}`} disabled={item.available===false}><Minus /></button>
                   <b>{item.quantity}</b>
-                  <button onClick={() => cart.updateQuantity(item.lineId, item.quantity + 1)} aria-label={`Increase ${item.name}`}><Plus /></button>
+                  <button onClick={() => cart.updateQuantity(item.lineId, item.quantity + 1)} aria-label={`Increase ${item.name}`} disabled={item.available===false}><Plus /></button>
                   <button className="remove-line" onClick={() => cart.removeItem(item.lineId)} aria-label={`Remove ${item.name}`}><Trash2 /></button>
                 </div>
               </div>
@@ -171,7 +174,8 @@ function CartDrawer({ cart, user }) {
             <div><span>Subtotal</span><b>{money(baseAmount)}</b></div>
             <div className="customer-vat-row"><span>{pricing.pricesIncludeVat ? `VAT included (${formatVatRate(pricing.vatRate)})` : 'VAT calculated at checkout'}</span><b>{money(vatAmount)}</b></div>
             <p>Delivery fees and discounts are calculated during checkout.</p>
-            <Link className="primary-button" to={user ? '/checkout' : '/login'} state={user ? undefined : { from: '/checkout' }} onClick={cart.closeCart}>Proceed to checkout</Link>
+            {cart.hasUnavailableItems&&<p className="drawer-availability-warning" role="alert">Remove {cart.unavailableItems.length} unavailable item{cart.unavailableItems.length===1?'':'s'} before checkout.</p>}
+            {cart.hasUnavailableItems||cart.checkingAvailability?<button className="primary-button" type="button" disabled>{cart.checkingAvailability?'Checking availability…':'Checkout unavailable'}</button>:<Link className="primary-button" to={user ? '/checkout' : '/login'} state={user ? undefined : { from: '/checkout' }} onClick={cart.closeCart}>Proceed to checkout</Link>}
             <button className="drawer-clear" type="button" onClick={() => setConfirmClear(true)}><Trash2 />Clear cart</button>
           </footer>
         )}
