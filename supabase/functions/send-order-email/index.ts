@@ -16,6 +16,7 @@ type OrderEmailPayload = {
   to?: string;
   order?: {
     order_number?: string;
+    receipt_number?: string;
     reference_code?: string;
     customer_name?: string;
     order_type_label?: string;
@@ -47,6 +48,7 @@ const storeProfile = {
     Deno.env.get("STORE_ADDRESS") ||
     "Lot 1 Block 210 Mark Street corner Dollar Street, Quezon City",
   contact: Deno.env.get("STORE_CONTACT") || "+63 997 533 7958",
+  tinId: "",
   fromEmail: Deno.env.get("GMAIL_SMTP_USER") || "",
   fromName: Deno.env.get("MAIL_FROM_NAME") || "thecoffeerealm",
   bannerImage:
@@ -168,7 +170,7 @@ const buildOrderEmailHtml = (payload: Required<Pick<OrderEmailPayload, "type" | 
                     order.order_number || "N/A",
                   )}</td></tr>
                   <tr><td style="padding:0 14px 12px;font-size:14px;color:#2f5c46;"><strong>Reference:</strong> ${escapeHtml(
-                    order.reference_code || "N/A",
+                    order.receipt_number || order.reference_code || "N/A",
                   )}</td></tr>
                   <tr><td style="padding:0 14px 12px;font-size:14px;color:#2f5c46;"><strong>Customer:</strong> ${escapeHtml(
                     order.customer_name || "Customer",
@@ -265,10 +267,11 @@ const buildReceiptHtml = (order: OrderEmailPayload["order"] = {}) => {
       <div class="receipt-store-name">${escapeHtml(storeProfile.name)}</div>
       <div>${escapeHtml(storeProfile.address)}</div>
       <div>${escapeHtml(storeProfile.contact)}</div>
+      <div>TIN ID: ${escapeHtml(storeProfile.tinId)}</div>
     </div>
     <div class="receipt-line"></div>
     <div class="receipt-row"><span>Order #:</span><span>${escapeHtml(order.order_number || "N/A")}</span></div>
-    <div class="receipt-row"><span>Reference #:</span><span>${escapeHtml(order.reference_code || "N/A")}</span></div>
+    <div class="receipt-row"><span>Reference #:</span><span>${escapeHtml(order.receipt_number || order.reference_code || "N/A")}</span></div>
     <div class="receipt-row"><span>Date:</span><span>${escapeHtml(order.order_date || "N/A")}</span></div>
     <div class="receipt-row"><span>Type:</span><span>${escapeHtml(order.order_type_label || "Order")}</span></div>
     ${

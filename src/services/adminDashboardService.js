@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase'
 
-const ORDER_SELECT = `id,order_number,order_type,order_source,status,customer_name,customer_id,final_total,discount_amount,delivery_fee,
+const ORDER_SELECT = `id,order_number,receipt_number,order_type,order_source,status,customer_name,customer_id,final_total,discount_amount,delivery_fee,
   payment_status,payment_confirmed,payment_proof_path,refund_status,is_voided,created_at,updated_at,
   schedule_date,schedule_time,cancellation_status,fulfillment_hold,cancellation_requested_at,
   order_items(item_name,display_name,quantity,line_total),

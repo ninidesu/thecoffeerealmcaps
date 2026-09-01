@@ -29,7 +29,7 @@ const scheduleDates=[{id:manilaDate(),name:'Today'},{id:manilaDate(1),name:'Tomo
 const timeLabel=minutes=>{const hour=Math.floor(minutes/60);const minute=minutes%60;return `${hour%12||12}:${String(minute).padStart(2,'0')} ${hour>=12?'PM':'AM'}`}
 const normalizePhone=value=>String(value||'').replace(/\D/g,'').slice(0,11)
 const normalizePostal=value=>String(value||'').replace(/\D/g,'').slice(0,6)
-const customerOrderNumber=value=>{const raw=String(value||'').trim();if(!raw)return '';if(/^#?D\d{10}$/i.test(raw))return raw.startsWith('#')?raw:`#${raw.toUpperCase()}`;const digits=raw.replace(/\D/g,'');if(digits.length>=10)return `#D${digits.slice(-10)}`;return raw}
+const customerOrderNumber=value=>{const raw=String(value||'').trim();if(!raw)return '';if(/^(WI|CR)-\d{4}-\d{4,}$/i.test(raw))return raw.toUpperCase();if(/^#?D\d{10}$/i.test(raw))return raw.startsWith('#')?raw:`#${raw.toUpperCase()}`;if(/^\d{10,}$/.test(raw))return `#D${raw.slice(-10)}`;return raw}
 const paymentMethodLabel=value=>value==='cod'?'Cash on delivery':value==='bank_transfer'?'Bank transfer':'GCash'
 const fulfillmentLabel=value=>value==='pickup'?'Store pickup':'Delivery'
 const titleCase=value=>String(value||'').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim().replace(/\b\w/g,letter=>letter.toUpperCase())
@@ -135,6 +135,7 @@ function OrderCompleteModal({order,freshOrder=false,fallbackEstimatedTime='',onT
   const [copied,setCopied]=useState(false)
   const orderNumber=order?.order_number||order?.reference_code||order?.order_id||order?.id
   const displayOrderNumber=customerOrderNumber(orderNumber)
+  const displayReferenceNumber=String(order?.receipt_number||order?.receiptNumber||order?.reference_code||'').trim()
   const fulfillment=order?.order_type||order?.fulfillment||'delivery'
   const status=orderStatusLabel(order,{fresh:freshOrder})
   const paymentMethod=paymentMethodLabel(orderPaymentMethod(order))
@@ -165,6 +166,7 @@ function OrderCompleteModal({order,freshOrder=false,fallbackEstimatedTime='',onT
             <button className="completion-copy" type="button" onClick={copyOrderNumber}>{copied?'Copied':'Copy'}</button>
           </div>
         </div>
+        {displayReferenceNumber&&<div className="completion-summary-row"><span>Reference number</span><div className="completion-summary-value"><b>{displayReferenceNumber}</b></div></div>}
         <div className="completion-summary-row"><span>Order status</span><div className="completion-summary-value"><b>{status}</b></div></div>
         <div className="completion-summary-row"><span>Payment method</span><div className="completion-summary-value"><b>{paymentMethod}</b></div></div>
         <div className="completion-summary-row"><span>Payment status</span><div className="completion-summary-value"><b>{paymentStatus}</b></div></div>
@@ -479,9 +481,10 @@ function OrderDetailsDrawer({order,addonNames,onClose}){
 }
 
 const receiptMoney=value=>`PHP ${Number(value||0).toFixed(2)}`
+const RECEIPT_TIN_ID=''
 const formatReceiptPreviewDate=value=>{if(!value)return'N/A';return new Intl.DateTimeFormat('en-PH',{month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(value))}
-const receiptReferenceNumber=order=>String(customerOrderNumber(order?.order_number||order?.reference_code||order?.id||'')).replace(/^#/,'')||'N/A'
-const receiptOrderNumber=order=>String(order?.order_id||order?.id||'N/A')
+const receiptReferenceNumber=order=>String(order?.receipt_number||order?.receiptNumber||order?.reference_code||'').trim()||'N/A'
+const receiptOrderNumber=order=>String(order?.order_number||order?.orderNumber||order?.order_id||order?.id||'N/A')
 const receiptScheduleValue=order=>{const date=order?.schedule_date||order?.scheduleDate;const time=order?.schedule_time||order?.scheduleTime;if(!date||!time)return'To be confirmed';const minutes=parseScheduleMinutes(time);const longDate=new Intl.DateTimeFormat('en-PH',{month:'long',day:'numeric',year:'numeric'}).format(new Date(`${date}T00:00:00`));return `${longDate} at ${minutes===null?String(time).slice(0,5):timeLabel(minutes)}`}
 const receiptProofStatus=order=>{const method=orderPaymentMethod(order);if(method==='cod')return'';const raw=String(order?.payments?.[0]?.status||order?.payment_status||'pending').toLowerCase();const uploaded=Boolean(order?.payment_proof_path);if(raw==='paid'||raw==='verified'||raw==='confirmed')return uploaded?'Uploaded and verified':'Verified';if(raw==='failed')return uploaded?'Uploaded with issue':'Payment issue';return uploaded?'Uploaded and pending verification':'Not uploaded'}
 const receiptItemDetails=(item,addonNames)=>{const custom=item.customizations||{};const addons=(item.addons||[]).map(id=>addonNames[id]||id);return [custom.sugarLevel,custom.temperature,custom.iceLevel,...addons,custom.special_instructions?`Note: ${custom.special_instructions}`:''].filter(Boolean)}
@@ -504,6 +507,7 @@ function ReceiptModal({order,addonNames,onClose}){
             <span className="customer-receipt-brand-badge"><img className="receipt-logo" src="/images/coffeerealmlogo.png" alt="Store logo" /></span>
             <div className="receipt-store-name" id="receipt-title">COFFEE REALM</div>
             <div className="receipt-store-info">Receipt preview</div>
+            <div className="receipt-store-info">TIN ID: {RECEIPT_TIN_ID}</div>
           </div>
           <div className="receipt-line" />
           <div className="receipt-row"><span className="receipt-label">Order #</span><span className="receipt-value">{receiptOrderNumber(order)}</span></div>

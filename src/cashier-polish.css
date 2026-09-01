@@ -2855,7 +2855,14 @@ html[data-theme='dark'] .cashier-v2 .cashier-transactions-list article {
   border-radius: 12px;
   background: #141A19 !important;
   box-shadow: none;
-  transition: background-color 180ms ease, border-color 180ms ease, transform 120ms ease;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    margin-left 180ms ease,
+    margin-right 180ms ease,
+    padding-left 180ms ease,
+    padding-right 180ms ease,
+    transform 120ms ease;
 }
 
 html[data-theme='dark'] .cashier-v2 .cashier-transactions-list article:hover {
@@ -6841,4 +6848,941 @@ html[data-theme='dark'] .cashier-v2 .transaction-pagination button.active {
 .cashier-v2 .transaction-details-modal .detail-total {
   border-top: 0 !important;
   border-bottom: 0 !important;
+}
+
+/* --- Cashier transaction workspace ---
+   Transaction history is a primary cashier destination, so it lives inside
+   the same two-panel workspace as the POS instead of opening a dialog. */
+.cashier-v2 .cashier-transactions-layout {
+  align-items: stretch;
+}
+
+.cashier-v2 .legacy-cashier-top nav button.is-active {
+  border-color: #a8c2ad;
+  background: #eef7ef;
+  color: #244a36;
+}
+
+.cashier-v2 .cashier-transactions-panel,
+.cashier-v2 .cashier-transaction-detail-panel {
+  min-width: 0;
+  min-height: calc(100dvh - 126px);
+  height: calc(100dvh - 126px);
+  max-height: none;
+}
+
+.cashier-v2 .cashier-transactions-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cashier-v2 .cashier-transactions-view,
+.cashier-v2 .cashier-transaction-details-view {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fffdf8;
+  color: #243528;
+  animation: cashier-workspace-enter 220ms ease-out both;
+}
+
+@keyframes cashier-workspace-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cashier-v2 .cashier-transactions-view > header,
+.cashier-v2 .cashier-transaction-details-view > header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 0;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e9e3;
+  background: linear-gradient(135deg, #fffdf8, #f5faf5);
+}
+
+.cashier-v2 .cashier-transactions-view > header > div,
+.cashier-v2 .cashier-transaction-details-view > header > div:first-child {
+  min-width: 0;
+}
+
+.cashier-v2 .cashier-transactions-view > header span,
+.cashier-v2 .cashier-transaction-details-view > header span {
+  display: block;
+  margin-bottom: 5px;
+  color: #718076;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.cashier-v2 .cashier-transactions-view > header h1,
+.cashier-v2 .cashier-transaction-details-view > header h2 {
+  max-width: 64rem;
+  margin: 0;
+  color: #203f30;
+  font-size: clamp(1.35rem, 2vw, 1.7rem);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+
+.cashier-v2 .cashier-transactions-view > header p,
+.cashier-v2 .cashier-transaction-details-view > header p {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+  color: #718076;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.cashier-v2 .cashier-transactions-view > header > button,
+.cashier-v2 .cashier-transaction-details-view .transaction-details-head-actions button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #cbd9ce;
+  border-radius: 11px;
+  background: #ffffff;
+  color: #31583a;
+  padding: 0 13px;
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.cashier-v2 .cashier-transactions-view > header > button:hover,
+.cashier-v2 .cashier-transaction-details-view .transaction-details-head-actions button:hover {
+  border-color: #8daf96;
+  background: #eef7ef;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-toolbar {
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid #e2e9e3;
+  background: #ffffff;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-search {
+  height: 44px;
+  min-height: 44px;
+  border-color: #cfdcd2;
+  border-radius: 10px;
+  background: #f8fbf8;
+  color: #617066;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-search input {
+  min-width: 0;
+  color: #243528;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-filters {
+  gap: 8px;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-filters select {
+  min-height: 44px;
+  border-color: #cfdcd2;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #415247;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-list-heading,
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list article {
+  grid-template-columns: minmax(0, 1.45fr) minmax(96px, 0.78fr) minmax(100px, 0.7fr) minmax(150px, 1.1fr) !important;
+  column-gap: 0;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-list-heading {
+  flex: 0 0 auto;
+  padding: 12px 24px;
+  border-bottom: 1px solid #e2e9e3;
+  background: #f6faf6;
+  color: #718076;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-list-heading > span,
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list article > * {
+  min-width: 0;
+  padding-right: 14px;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-list-heading > span:nth-child(3),
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list article > strong {
+  text-align: right;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-list-heading > span:last-child,
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list article > .transaction-actions {
+  grid-column: 4;
+  padding-right: 0;
+  text-align: right;
+}
+
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  align-content: start;
+  gap: 0;
+  padding: 0 24px 18px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #a9c0ad transparent;
+}
+
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list article {
+  align-self: start;
+  margin: 0;
+  padding: 15px 0;
+  border: 0;
+  border-bottom: 1px solid #e5ece6;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition:
+    background-color 180ms ease,
+    margin-left 180ms ease,
+    margin-right 180ms ease,
+    padding-left 180ms ease,
+    padding-right 180ms ease;
+}
+
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list article:hover {
+  background: #f8fbf8;
+}
+
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list article.is-selected {
+  margin-inline: -12px;
+  padding-inline: 12px;
+  background: #eef7ef;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-order b {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #203f30;
+  font-size: 0.86rem;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-order span {
+  display: block;
+  margin-top: 4px;
+  color: #7a897e;
+  font-size: 0.71rem;
+  font-weight: 650;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-payment {
+  color: #56685b;
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-transform: capitalize;
+}
+
+.cashier-v2 .cashier-transactions-view .cashier-transactions-list strong {
+  color: #31583a;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-actions {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end !important;
+  gap: 7px;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-actions button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #c0d2c4;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #31583a;
+  padding: 0 10px;
+  font-size: 0.73rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-actions button:first-child {
+  border-color: #a7c3af;
+  color: #245e88;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-actions button:hover {
+  border-color: #8daf96;
+  background: #eef7ef;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-actions button:first-child:hover {
+  border-color: #8eb2cc;
+  background: #eef6fb;
+}
+
+.cashier-v2 .cashier-transactions-view .cashier-empty-state {
+  grid-column: 1 / -1;
+  min-height: 280px;
+  margin-top: 18px;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-pagination {
+  flex: 0 0 auto;
+  padding: 12px 24px max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid #e2e9e3;
+  background: #ffffff;
+}
+
+.cashier-v2 .cashier-transactions-view .transaction-pagination button {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.cashier-v2 .cashier-transaction-detail-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cashier-v2 .cashier-transaction-placeholder-header {
+  flex: 0 0 auto;
+  min-height: 76px;
+  margin: 0;
+  padding: 17px 20px;
+  border-bottom: 1px solid #e2e9e3;
+  background: linear-gradient(135deg, #fffdf8, #f5faf5);
+}
+
+.cashier-v2 .cashier-transaction-placeholder-header > div {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.cashier-v2 .cashier-transaction-placeholder-header > div > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cashier-v2 .cashier-transaction-placeholder-header small {
+  color: #718076;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.cashier-v2 .cashier-transaction-placeholder-header b {
+  color: #203f30;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.cashier-v2 .cashier-transaction-empty-state {
+  flex: 1 1 auto;
+  min-height: 280px;
+  margin: 18px;
+  padding: 24px;
+  border: 1px dashed #c7d7cc;
+  border-radius: 22px;
+  background: #f8fbf8;
+  color: #718076;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 9px;
+  text-align: center;
+}
+
+.cashier-v2 .cashier-transaction-empty-state svg {
+  color: #84a68b;
+}
+
+.cashier-v2 .cashier-transaction-empty-state b {
+  color: #203f30;
+  font-size: 0.9rem;
+}
+
+.cashier-v2 .cashier-transaction-empty-state span {
+  max-width: 240px;
+  color: #718076;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.cashier-v2 .cashier-transaction-details-view > header {
+  align-items: flex-start;
+}
+
+.cashier-v2 .cashier-transaction-details-view .transaction-details-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: 0;
+}
+
+.cashier-v2 .cashier-transaction-details-view .transaction-details-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  scrollbar-width: thin;
+  scrollbar-color: #a9c0ad transparent;
+}
+
+.cashier-v2 .cashier-transaction-details-view .detail-meta {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cashier-v2 .cashier-transaction-details-view .detail-meta > div {
+  min-width: 0;
+}
+
+.cashier-v2 .cashier-transaction-details-view .detail-summary p b {
+  max-width: 62%;
+}
+
+@media (max-width: 1180px) and (min-width: 900px) {
+  .cashier-v2 .cashier-transactions-panel,
+  .cashier-v2 .cashier-transaction-detail-panel {
+    min-height: calc(100dvh - 150px);
+    height: calc(100dvh - 150px);
+  }
+}
+
+@media (max-width: 899px) {
+  .cashier-v2 .cashier-transactions-panel,
+  .cashier-v2 .cashier-transaction-detail-panel {
+    height: auto;
+    min-height: 0;
+  }
+
+  .cashier-v2 .cashier-transactions-view {
+    height: auto;
+    min-height: calc(100dvh - 190px);
+  }
+
+  .cashier-v2 .cashier-transaction-detail-panel {
+    min-height: 430px;
+  }
+
+  .cashier-v2 .cashier-transaction-details-view {
+    min-height: 430px;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 14px 16px;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-search {
+    width: 100%;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: initial;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-filters select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-list-heading {
+    display: none;
+  }
+
+  .cashier-v2 .cashier-transactions-view .cashier-transactions-list {
+    min-height: 0;
+    padding: 0 16px 16px;
+    overflow: visible;
+  }
+
+  .cashier-v2 .cashier-transactions-view .cashier-transactions-list article {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 7px 12px;
+    padding: 14px 0;
+  }
+
+  .cashier-v2 .cashier-transactions-view .cashier-transactions-list article.is-selected {
+    margin-inline: -8px;
+    padding-inline: 8px;
+  }
+
+  .cashier-v2 .cashier-transactions-view .cashier-transactions-list article > * {
+    padding-right: 0;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-order {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-payment {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .cashier-v2 .cashier-transactions-view .cashier-transactions-list article > strong {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-actions {
+    grid-column: 1 / -1 !important;
+    grid-row: 3;
+    justify-content: flex-end !important;
+    padding-top: 4px;
+  }
+
+  .cashier-v2 .cashier-transactions-view .cashier-empty-state {
+    min-height: 240px;
+    margin-top: 16px;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-pagination {
+    flex-wrap: wrap;
+    padding-inline: 16px;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-pagination > span {
+    flex: 1 1 100%;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-pagination > nav {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .cashier-v2 .cashier-transactions-view > header,
+  .cashier-v2 .cashier-transaction-details-view > header {
+    padding: 18px 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  .cashier-v2 .cashier-transactions-view > header,
+  .cashier-v2 .cashier-transaction-details-view > header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .cashier-v2 .cashier-transactions-view > header > div,
+  .cashier-v2 .cashier-transaction-details-view > header > div:first-child {
+    flex: 1 1 180px;
+  }
+
+  .cashier-v2 .cashier-transactions-view > header > button,
+  .cashier-v2 .cashier-transaction-details-view .transaction-details-head-actions {
+    flex: 1 1 100%;
+  }
+
+  .cashier-v2 .cashier-transactions-view > header > button,
+  .cashier-v2 .cashier-transaction-details-view .transaction-details-head-actions button {
+    width: 100%;
+  }
+
+  .cashier-v2 .cashier-transaction-details-view .transaction-details-body {
+    padding: 16px;
+  }
+
+  .cashier-v2 .cashier-transaction-details-view .detail-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .cashier-v2 .cashier-transaction-details-view .detail-summary p b {
+    max-width: 58%;
+  }
+}
+
+@media (max-width: 420px) {
+  .cashier-v2 .cashier-transactions-view .transaction-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-pagination {
+    align-items: flex-start;
+  }
+
+  .cashier-v2 .cashier-transactions-view .transaction-pagination > nav {
+    gap: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cashier-v2 .cashier-transactions-view,
+  .cashier-v2 .cashier-transaction-details-view {
+    animation: none;
+  }
+}
+
+/* Dark mode counterpart for the in-container transaction workspace. */
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view {
+  background: #122219;
+  color: #edf6ef;
+}
+
+html[data-theme='dark'] .cashier-v2 .legacy-cashier-top nav button.is-active {
+  border-color: #5c9e70;
+  background: #1b3927;
+  color: #edf6ef;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view > header,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view > header,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-placeholder-header {
+  border-color: #294737;
+  background: linear-gradient(135deg, #14291d, #10261a);
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view > header span,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view > header p,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view > header span,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view > header p,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-placeholder-header small {
+  color: #a9b9ad;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view > header h1,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view > header h2,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-placeholder-header b,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-empty-state b {
+  color: #edf6ef;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view > header > button,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .transaction-details-head-actions button {
+  border-color: #3b5d47;
+  background: #0d1d14;
+  color: #cce2d0;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view > header > button:hover,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .transaction-details-head-actions button:hover {
+  border-color: #6aaa7a;
+  background: #1b3927;
+  color: #edf6ef;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-toolbar,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-pagination {
+  border-color: #294737;
+  background: #122219;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-search,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-filters select {
+  border-color: #3b5d47;
+  background: #0d1d14;
+  color: #cce2d0;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-search input {
+  color: #edf6ef;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-list-heading {
+  border-color: #294737;
+  background: #0d1d14;
+  color: #a9b9ad;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .cashier-transactions-list article {
+  border-color: #294737;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .cashier-transactions-list article:hover {
+  background: #14291d;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .cashier-transactions-list article.is-selected {
+  background: #1b3927;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-order b,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-payment,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-order span,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .cashier-transactions-list strong,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-pagination,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-pagination > span {
+  color: #cce2d0;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-order span,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-payment,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-pagination > span {
+  color: #9fb3a4;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-actions button,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-pagination button {
+  border-color: #3b5d47;
+  background: #0d1d14;
+  color: #cce2d0;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-actions button:hover,
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-pagination button:hover:not(:disabled) {
+  border-color: #6aaa7a;
+  background: #1b3927;
+  color: #edf6ef;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-actions button:first-child {
+  border-color: #4a7089;
+  color: #a9d0ed;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-actions button:first-child:hover {
+  border-color: #75a8c5;
+  background: #142c3b;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transactions-view .transaction-pagination button.active {
+  border-color: #7e9b80;
+  background: #5a755c;
+  color: #101a13;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-empty-state {
+  border-color: #3b5d47;
+  background: #0d1d14;
+  color: #a9b9ad;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-empty-state svg {
+  color: #79a987;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-empty-state span,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-items article div > span,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-items article > span,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-items p {
+  color: #9fb3a4;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .transaction-details-body,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-items,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-items article,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-summary > div,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-summary p {
+  border-color: #294737;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-meta > div {
+  border-color: #3b5d47;
+  background: #1b3927;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-meta span,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-summary p span {
+  color: #a9b9ad;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-meta b,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-items b,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-items strong,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-summary p b,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-total,
+html[data-theme='dark'] .cashier-v2 .cashier-transaction-details-view .detail-total strong {
+  color: #edf6ef;
+}
+
+/* --- Live cashier status: compact hierarchy with truthful connection states --- */
+html[data-theme] .cashier-v2 .cashier-connection-status {
+  min-width: 78px;
+  min-height: 38px;
+  gap: 8px !important;
+  padding: 0 12px 0 10px !important;
+  border-radius: 12px;
+  box-shadow: 0 5px 14px rgba(32, 63, 48, 0.08);
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+html[data-theme] .cashier-v2 .cashier-connection-status i {
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+}
+
+html[data-theme] .cashier-v2 .cashier-status-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  line-height: 1;
+}
+
+html[data-theme] .cashier-v2 .cashier-status-label {
+  display: block !important;
+  overflow: hidden;
+  color: inherit !important;
+  font-size: 0.7rem !important;
+  font-weight: 850 !important;
+  line-height: 1.05 !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-theme] .cashier-v2 .cashier-status-detail {
+  display: block;
+  overflow: hidden;
+  color: currentColor;
+  font-size: 0.56rem;
+  font-weight: 700;
+  line-height: 1.05;
+  opacity: 0.7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-connection-status.is-ready {
+  border-color: #c9dfcf !important;
+  background: #f1f8f2 !important;
+  color: #2d6745 !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-connection-status.is-ready i {
+  background: #3f8a5a !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-connection-status.is-syncing {
+  border-color: #e5d294 !important;
+  background: #fffaf0 !important;
+  color: #775d19 !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-connection-status.is-syncing i {
+  background: #c89521 !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-connection-status.is-warning {
+  border-color: #e3b7af !important;
+  background: #fff5f3 !important;
+  color: #984b3b !important;
+}
+
+html[data-theme='light'] .cashier-v2 .cashier-connection-status.is-warning i {
+  background: #b96552 !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-connection-status {
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.18);
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-connection-status.is-ready {
+  border-color: #315e45 !important;
+  background: #172b20 !important;
+  color: #a9dfb5 !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-connection-status.is-ready i {
+  background: #72c58a !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-connection-status.is-syncing {
+  border-color: #765928 !important;
+  background: #2b2415 !important;
+  color: #e6bb6d !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-connection-status.is-syncing i {
+  background: #d9a53c !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-connection-status.is-warning {
+  border-color: #704039 !important;
+  background: #2a1b19 !important;
+  color: #efa496 !important;
+}
+
+html[data-theme='dark'] .cashier-v2 .cashier-connection-status.is-warning i {
+  background: #d87564 !important;
+}
+
+html[data-theme] .cashier-v2 .cashier-connection-status.is-ready i,
+html[data-theme] .cashier-v2 .cashier-connection-status.is-syncing i {
+  animation: cashier-live-status-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes cashier-live-status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 17%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 5%, transparent);
+  }
+}
+
+@media (max-width: 600px) {
+  html[data-theme] .cashier-v2 .cashier-connection-status {
+    min-width: 0;
+    min-height: 34px;
+    gap: 7px !important;
+    padding: 0 9px 0 8px !important;
+    border-radius: 10px;
+  }
+
+  html[data-theme] .cashier-v2 .cashier-status-label {
+    font-size: 0.64rem !important;
+  }
+
+  html[data-theme] .cashier-v2 .cashier-status-detail {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] .cashier-v2 .cashier-connection-status.is-ready i,
+  html[data-theme] .cashier-v2 .cashier-connection-status.is-syncing i {
+    animation: none !important;
+  }
+}
+
+/* Cashier brand mark: use the supplied logo without its white image canvas. */
+html[data-theme] .cashier-v2 .cashier-brand-mark {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-theme] .cashier-v2 .cashier-brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+  background: transparent;
+}
+
+@media (max-width: 600px) {
+  html[data-theme] .cashier-v2 .cashier-brand-mark {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+  }
 }
