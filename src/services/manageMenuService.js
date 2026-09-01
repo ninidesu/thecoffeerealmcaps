@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { validateImageFile } from '../utils/imageUpload'
 
 const fallbackImage = '/images/coffeerealmlogo.png'
 
@@ -173,10 +174,7 @@ export async function setMenuItemRecipe(menuItemId, ingredients) {
 }
 
 export async function uploadMenuItemImage(file) {
-  const extensions = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
-  const extension = extensions[file?.type]
-  if (!extension) throw new Error('Upload a JPG, PNG, or WEBP image only.')
-  if (file.size > 5 * 1024 * 1024) throw new Error('The image must be 5 MB or smaller.')
+  const { extension } = await validateImageFile(file, { label: 'Menu photo' })
   const path = `${crypto.randomUUID()}.${extension}`
   const { error: uploadError } = await supabase.storage.from('menu-images').upload(path, file, { contentType: file.type, upsert: false })
   if (uploadError) throw uploadError

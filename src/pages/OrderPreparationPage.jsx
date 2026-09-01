@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, Bell, Bike, Check, CheckCircle2, Clock, Coffee,
+  AlertTriangle, Bell, Bike, Check, Clock, Coffee,
   MapPin, Package, Phone, RefreshCw, Search, ShoppingBag, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
@@ -21,10 +21,16 @@ const PENDING_STATUSES = ['Order Received', 'Awaiting Payment Verification', 'Pe
 const COLUMNS = [
   { key: 'pending', title: 'Pending Confirmation', subtitle: 'Verify payment proofs', icon: Clock, tone: 'amber' },
   { key: 'preparing', title: 'Preparing', subtitle: 'Orders being prepared', icon: Coffee, tone: 'blue' },
-  { key: 'ready', title: 'Ready for Pickup / Dine-in / Take-out', subtitle: 'Orders ready for handoff or in-store service', icon: Package, tone: 'green' },
+  { key: 'ready', title: 'Ready for Pickup / Dine-in / Take-out', icon: Package, tone: 'green' },
   { key: 'delivery', title: 'Out for Delivery', subtitle: 'Orders currently being delivered', icon: Bike, tone: 'teal' },
-  { key: 'completed', title: 'Completed', subtitle: 'Finished orders', icon: CheckCircle2, tone: 'neutral' },
 ]
+
+const ORDER_TABS = ['active', 'completed', 'cancelled']
+
+function normalizeOrderTab(value) {
+  if (value === 'scheduled') return 'active'
+  return ORDER_TABS.includes(value) ? value : 'active'
+}
 
 function stageOf(order) {
   if (order.status === 'Cancelled') return 'cancelled'
@@ -32,7 +38,7 @@ function stageOf(order) {
   if (order.status === 'Preparing') return 'preparing'
   if (order.status === 'Ready for Pickup') return 'ready'
   if (order.status === 'Out for Delivery') return 'delivery'
-  if (order.status === 'Completed') return 'completed'
+  if (['Completed', 'Received'].includes(order.status)) return 'completed'
   return 'pending'
 }
 
@@ -59,10 +65,6 @@ function isOverdue(order) {
   if (stage === 'completed' || stage === 'cancelled') return false
   const when = scheduleDate(order)
   return when ? when.getTime() < Date.now() : false
-}
-function isScheduledOrder(order, referenceTime = new Date()) {
-  const when = scheduleDate(order)
-  return Boolean(when && when.getTime() - referenceTime.getTime() > 45 * 60 * 1000)
 }
 function timeAgo(dateString) {
   const diffMs = Date.now() - new Date(dateString).getTime()
@@ -133,7 +135,7 @@ function mainActionFor(order) {
       : { label: 'Mark Out for Delivery', next: 'Out for Delivery', kind: 'advance' }
   }
   if (stage === 'ready') return { label: order.order_type === 'walk-in' ? 'Complete Order' : 'Complete Pickup', next: 'Completed', kind: 'advance' }
-  if (stage === 'delivery') return { label: 'Mark Completed', next: 'Completed', kind: 'advance' }
+  if (stage === 'delivery') return null
   return null
 }
 
@@ -170,7 +172,7 @@ export default function OrderPreparationPage() {
         const preferences = await fetchStaffPreferences(profile.id)
         if (!active) return
         const remembered = getRememberedStaffFilters('orders')
-        setActiveTab(remembered?.activeTab || preferences.order_queue)
+        setActiveTab(normalizeOrderTab(remembered?.activeTab || preferences.order_queue))
         setSortBy(remembered?.sortBy || preferences.order_sort)
         setFulfillmentFilter(remembered?.fulfillmentFilter || preferences.fulfillment_filter)
         if (remembered) {
@@ -340,38 +342,39 @@ export default function OrderPreparationPage() {
       return true
     }
     return {
-      active: orders.filter((order) => matchesFilters(order, 'active')),
-      scheduled: orders.filter((order) => matchesFilters(order, 'scheduled')),
-      cancelled: orders.filter((order) => matchesFilters(order, 'cancelled')),
+      active: orders.filter((order) => matchesFilters(order, 'active') && !['completed', 'cancelled'].includes(stageOf(order)) && !cancellationRequested(order)),
+      completed: orders.filter((order) => matchesFilters(order, 'completed') && stageOf(order) === 'completed'),
+      cancelled: orders.filter((order) => matchesFilters(order, 'cancelled') && (stageOf(order) === 'cancelled' || cancellationRequested(order))),
     }
   }, [orders, search, fulfillmentFilter, paymentFilter, dateFilter])
-  const filtered = filteredByTab[activeTab]
+  const filtered = useMemo(() => filteredByTab[activeTab] || [], [filteredByTab, activeTab])
 
   const sorted = useMemo(() => {
     const list = [...filtered]
-    const eventTime = (order) => activeTab === 'cancelled'
-      ? new Date(order.cancellation_requested_at || order.cancelled_at || order.created_at).getTime()
-      : scheduleDate(order)?.getTime() || 0
+    const eventTime = (order) => {
+      if (activeTab === 'cancelled') return new Date(order.cancellation_requested_at || order.cancelled_at || order.created_at).getTime()
+      if (activeTab === 'completed') return new Date(order.completed_at || order.updated_at || order.created_at).getTime()
+      return scheduleDate(order)?.getTime() || 0
+    }
     if (sortBy === 'newest') list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     else if (sortBy === 'oldest') list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    else if (sortBy === 'scheduled') list.sort((a, b) => eventTime(a) - eventTime(b))
-    else if (sortBy === 'priority') list.sort((a, b) => activeTab === 'cancelled'
+    else if (sortBy === 'scheduled') list.sort((a, b) => activeTab === 'completed' ? eventTime(b) - eventTime(a) : eventTime(a) - eventTime(b))
+    else if (sortBy === 'priority') list.sort((a, b) => ['cancelled', 'completed'].includes(activeTab)
       ? eventTime(b) - eventTime(a)
       : Number(isOverdue(b)) - Number(isOverdue(a)) || eventTime(a) - eventTime(b))
     return list
   }, [filtered, sortBy, activeTab])
 
-  const activeColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key && !cancellationRequested(o) && !isScheduledOrder(o, now)) })), [sorted, now])
-  const scheduledColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key && !cancellationRequested(o) && isScheduledOrder(o, now)) })), [sorted, now])
-  const visibleColumns = activeTab === 'scheduled' ? scheduledColumns : activeColumns
+  const activeColumns = useMemo(() => COLUMNS.map((col) => ({ ...col, orders: sorted.filter((o) => stageOf(o) === col.key) })), [sorted])
+  const selectedMobileStage = COLUMNS.some((column) => column.key === mobileStage) ? mobileStage : 'pending'
   const cancelledByCustomer = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && !o.cancellation_resolved && !cancellationStartedByStaff(o)), [sorted])
   const cancelledByStaff = useMemo(() => sorted.filter((o) => !o.cancellation_resolved && cancellationStartedByStaff(o) && (stageOf(o) === 'cancelled' || cancellationRequested(o))), [sorted])
   const resolvedCancellations = useMemo(() => sorted.filter((o) => stageOf(o) === 'cancelled' && o.cancellation_resolved), [sorted])
   const cancellationRequests = useMemo(() => sorted.filter((o) => cancellationRequested(o) && !cancellationStartedByStaff(o)), [sorted])
 
-  const activeOrderCount = filteredByTab.active.filter((o) => stageOf(o) !== 'cancelled' && !cancellationRequested(o) && !isScheduledOrder(o, now)).length
-  const scheduledOrderCount = filteredByTab.scheduled.filter((o) => stageOf(o) !== 'cancelled' && !cancellationRequested(o) && isScheduledOrder(o, now)).length
-  const cancelledOrderCount = filteredByTab.cancelled.filter((o) => stageOf(o) === 'cancelled' || cancellationRequested(o)).length
+  const activeOrderCount = filteredByTab.active.length
+  const completedOrderCount = filteredByTab.completed.length
+  const cancelledOrderCount = filteredByTab.cancelled.length
   const today = now.toLocaleDateString('en-CA')
   const yesterdayDate = new Date(now)
   yesterdayDate.setDate(yesterdayDate.getDate() - 1)
@@ -388,8 +391,8 @@ export default function OrderPreparationPage() {
         <button type="button" role="tab" aria-selected={activeTab === 'active'} className={activeTab === 'active' ? 'active' : ''} onClick={() => setActiveTab('active')}>
           Active Orders <b>{activeOrderCount}</b>
         </button>
-        <button type="button" role="tab" aria-selected={activeTab === 'scheduled'} className={activeTab === 'scheduled' ? 'active' : ''} onClick={() => setActiveTab('scheduled')}>
-          Scheduled Orders <b>{scheduledOrderCount}</b>
+        <button type="button" role="tab" aria-selected={activeTab === 'completed'} className={activeTab === 'completed' ? 'active' : ''} onClick={() => setActiveTab('completed')}>
+          Completed Orders <b>{completedOrderCount}</b>
         </button>
         <button type="button" role="tab" aria-selected={activeTab === 'cancelled'} className={activeTab === 'cancelled' ? 'active' : ''} onClick={() => setActiveTab('cancelled')}>
           Cancelled Orders <b>{cancelledOrderCount}</b>
@@ -421,17 +424,17 @@ export default function OrderPreparationPage() {
         <label className="ops-toolbar-field"><span>Fulfillment</span><select value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)}><option value="all">All</option><option value="walk-in">Walk-in</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></label>
         <label className="ops-toolbar-field"><span>Payment method</span><select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="all">All methods</option><option value="cash">Cash</option><option value="gcash">GCash</option><option value="bank_transfer">Bank transfer</option><option value="cod">Cash on Delivery</option></select></label>
         <label className="ops-toolbar-field"><span>Date</span><select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}><option value="">All dates</option><option value={today}>Today</option><option value={yesterday}>Yesterday</option></select></label>
-        <label className="ops-toolbar-field"><span>Sort by</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value)}><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="scheduled">{activeTab === 'cancelled' ? 'Cancelled time' : 'Scheduled time'}</option><option value="priority">Priority (overdue first)</option></select></label>
+        <label className="ops-toolbar-field"><span>Sort by</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value)}><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="scheduled">{activeTab === 'cancelled' ? 'Cancelled time' : 'Scheduled time'}</option><option value="priority">{activeTab === 'completed' ? 'Recently completed' : 'Priority (overdue first)'}</option></select></label>
       </div>
-      {(activeTab === 'active' || activeTab === 'scheduled') && <>
+      {activeTab === 'active' && <>
       {loading ? (
         <p className="customer-state">Loading orders…</p>
       ) : (
         <>
           <div className="ops-kanban">
-            {visibleColumns.map((col) => (
+            {activeColumns.map((col) => (
               <div className={`ops-column tone-${col.tone}`} key={col.key} ref={(el) => { columnRefs.current[col.key] = el }}>
-                <header><span className="ops-column-dot" /><div><h3>{col.title}</h3><p>{col.subtitle}</p></div><span className="ops-column-count" aria-label={`${col.orders.length} orders`}>{col.orders.length}</span></header>
+                <header><span className="ops-column-dot" /><div><h3>{col.title}</h3>{col.subtitle&&<p>{col.subtitle}</p>}</div><span className="ops-column-count" aria-label={`${col.orders.length} orders`}>{col.orders.length}</span></header>
                 <div className="ops-column-body">
                   {col.orders.length === 0 ? <EmptyColumn /> : col.orders.map((order) => (
                     <OrderCard key={order.id} order={order} busy={busyId === order.id} onView={() => setDrawerOrder(order)}
@@ -445,16 +448,16 @@ export default function OrderPreparationPage() {
 
           <div className="ops-mobile">
             <div className="ops-mobile-tabs">
-              {visibleColumns.map((col) => (
-                <button type="button" key={col.key} className={mobileStage === col.key ? 'active' : ''} onClick={() => setMobileStage(col.key)}>
+              {activeColumns.map((col) => (
+                <button type="button" key={col.key} className={selectedMobileStage === col.key ? 'active' : ''} onClick={() => setMobileStage(col.key)}>
                   {col.title} ({col.orders.length})
                 </button>
               ))}
             </div>
             <div className="ops-mobile-list">
-              {(visibleColumns.find((c) => c.key === mobileStage)?.orders || []).length === 0
+              {(activeColumns.find((c) => c.key === selectedMobileStage)?.orders || []).length === 0
                 ? <EmptyColumn />
-                : visibleColumns.find((c) => c.key === mobileStage).orders.map((order) => (
+                : activeColumns.find((c) => c.key === selectedMobileStage).orders.map((order) => (
                   <OrderCard key={order.id} order={order} busy={busyId === order.id} onView={() => setDrawerOrder(order)}
                     onMain={(action) => setConfirmAction({ order, ...action })}
                     onCancel={() => setCancelTarget(order)} />
@@ -464,6 +467,26 @@ export default function OrderPreparationPage() {
         </>
       )}
       </>}
+
+      {activeTab === 'completed' && (
+        <section className="ops-completed-orders">
+          <div className="ops-completed-heading">
+            <div><h2>Completed Orders</h2><p>Finished orders are kept here for quick review and reference.</p></div>
+            <span>{completedOrderCount} total</span>
+          </div>
+          {loading ? <p className="customer-state">Loading completed orders…</p> : sorted.length === 0 ? (
+            <div className="ops-empty"><ShoppingBag size={20} /><span>No completed orders match these filters.</span></div>
+          ) : (
+            <div className="ops-completed-grid">
+              {sorted.map((order) => (
+                <OrderCard key={order.id} order={order} busy={busyId === order.id} onView={() => setDrawerOrder(order)}
+                  onMain={(action) => setConfirmAction({ order, ...action })}
+                  onCancel={() => setCancelTarget(order)} />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {activeTab === 'cancelled' &&
       <section className="ops-cancellations">
@@ -751,8 +774,8 @@ function OrderDrawer({ order, addonNames, onClose, onMain, onCancel, busy }) {
     { label: 'Order placed', done: true, at: order.created_at },
     { label: 'Payment verified', done: method === 'cod' || order.payment_confirmed, at: order.payment_confirmed_at },
     { label: 'Preparing', done: !PENDING_STATUSES.includes(order.status) && order.status !== 'Cancelled' },
-    { label: order.order_type === 'delivery' ? 'Out for delivery' : 'Ready for pickup / dine-in / take-out', done: ['Ready for Pickup', 'Out for Delivery', 'Completed'].includes(order.status) },
-    { label: 'Completed', done: order.status === 'Completed' },
+    { label: order.order_type === 'delivery' ? 'Out for delivery' : 'Ready for pickup / dine-in / take-out', done: ['Ready for Pickup', 'Out for Delivery', 'Completed', 'Received'].includes(order.status) },
+    { label: order.order_type === 'delivery' ? 'Received by customer' : 'Completed', done: order.order_type === 'delivery' ? order.status === 'Received' : order.status === 'Completed' },
   ]
 
   return (

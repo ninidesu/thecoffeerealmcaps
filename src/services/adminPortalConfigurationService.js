@@ -1,5 +1,6 @@
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { DEFAULT_PRICING } from '../utils/pricing'
+import { validateImageFile } from '../utils/imageUpload'
 
 export const CONTENT_DEFAULTS = {
   hero: {
@@ -84,7 +85,6 @@ export async function savePortalConfiguration(scope, key, value, isPublic = true
   return data
 }
 
-const qrExtension = (file) => ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[file?.type])
 const storagePathFromPublicUrl = (url) => {
   const marker = '/storage/v1/object/public/portal-assets/'
   const index = String(url || '').indexOf(marker)
@@ -99,9 +99,7 @@ export async function savePaymentConfiguration(settings, qrFiles = {}) {
   try {
     for (const [method, file] of Object.entries(qrFiles)) {
       if (!file) continue
-      const extension = qrExtension(file)
-      if (!extension) throw new Error('Upload a JPG, PNG, or WEBP QR image only.')
-      if (file.size > 5 * 1024 * 1024) throw new Error('Each QR image must be 5 MB or smaller.')
+      const { extension } = await validateImageFile(file, { label: 'Payment QR image' })
       const settingKey = method === 'gcash' ? 'gcashQrUrl' : 'bankQrUrl'
       const path = `payment-qr/${method}-${crypto.randomUUID()}.${extension}`
       const { error: uploadError } = await supabase.storage.from('portal-assets').upload(path, file, { contentType: file.type, upsert: false })
