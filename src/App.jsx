@@ -27,7 +27,7 @@ import {
   OrderReviewPage,
   OrderTrackingPage,
   ProductPage,
-  SettingsPage,
+  ProfilePage,
 } from './pages/customer/CustomerPages'
 
 const protect = (page) => <CustomerProtectedRoute>{page}</CustomerProtectedRoute>
@@ -48,9 +48,9 @@ export default function App() {
           <Route path="/orders" element={protect(<MyOrdersPage />)} />
           <Route path="/orders/:id/confirmation" element={protect(<OrderConfirmationPage />)} />
           <Route path="/orders/:id/track" element={protect(<OrderTrackingPage />)} />
-          <Route path="/profile" element={<Navigate to="/settings" replace />} />
-          <Route path="/addresses" element={<Navigate to="/settings" replace />} />
-          <Route path="/settings" element={protect(<SettingsPage />)} />
+          <Route path="/profile" element={protect(<ProfilePage />)} />
+          <Route path="/addresses" element={<Navigate to="/profile" replace />} />
+          <Route path="/settings" element={<Navigate to="/profile" replace />} />
         </Route>
 
         <Route path="/login" element={<CustomerLoginPage />} />

@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, Bike, Check, ChevronLeft, Clock3, Coffee, CreditCard, Lock, Mail, MapPin, Minus, PackageCheck, PartyPopper, Pencil, Plus, Printer, Receipt, RotateCcw, Search, ShieldCheck, ShoppingBag, Star, Trash2, X, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Bike, Camera, Check, ChevronLeft, Clock3, Coffee, CreditCard, Lock, Mail, MapPin, Minus, PackageCheck, PartyPopper, Pencil, Plus, Printer, Receipt, RotateCcw, Search, ShieldCheck, ShoppingBag, Star, Trash2, X, XCircle } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -6,7 +6,7 @@ import { useMenuCatalog } from '../../hooks/useMenuCatalog'
 import { useCart } from '../../context/CartContext'
 import { useAuth } from '../../context/AuthContext'
 import { usePricing } from '../../context/usePricing'
-import { createCustomerOrder, fetchAddresses, createAddress, updateAddress, deleteAddress, setDefaultAddress, saveProfile, uploadPaymentProof, fetchCustomerOrders, fetchCustomerOrder, cancelCustomerOrder, getCustomerPaymentProofUrl, fetchOrderFeedback, submitOrderFeedback, fetchAddonNameMap } from '../../services/customerService'
+import { createCustomerOrder, fetchAddresses, createAddress, updateAddress, deleteAddress, setDefaultAddress, saveProfile, uploadPaymentProof, fetchCustomerOrders, fetchCustomerOrder, cancelCustomerOrder, confirmCustomerOrderReceived, getCustomerPaymentProofUrl, fetchOrderFeedback, submitOrderFeedback, fetchAddonNameMap, PROFILE_PICTURE_ACCEPT, validateProfilePicture } from '../../services/customerService'
 import { deliveryAreas } from '../../data/deliveryAreas'
 import { money } from '../../utils/money'
 import { describeError } from '../../utils/describeError'
@@ -16,6 +16,8 @@ import { isSupabaseConfigured, supabase } from '../../lib/supabase'
 import { SYSTEM_DEFAULTS, fetchPublicDeliveryAreas, fetchPublicPortalData } from '../../services/adminPortalConfigurationService'
 import { normalizeOrderTemperature } from '../../utils/temperature'
 import { buildVatExemptOrderBreakdown, formatVatRate, vatBreakdownFromInclusiveAmount } from '../../utils/pricing'
+import { IMAGE_UPLOAD_ACCEPT, validateImageFile } from '../../utils/imageUpload'
+import { clearCheckoutDraft, readCheckoutDraft, writeCheckoutDraft } from '../../utils/checkoutDraft'
 export function MenuPage(){const [query,setQuery]=useState('');const [category,setCategory]=useState('All');const [chipMotion,setChipMotion]=useState('All');const {products,categories,loading,error}=useMenuCatalog();const {addToCart,openProduct,modal}=useProductCustomization({modalVariant:'menu-detail'});useEffect(()=>{const timeout=window.setTimeout(()=>setChipMotion(''),460);return()=>window.clearTimeout(timeout)},[category]);const filtered=products.filter(p=>(category==='All'||p.category===category)&&`${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase()));return <main className="customer-main"><section className="page-hero"><span>Made fresh in North Fairview</span><h1>Find your next favorite.</h1></section><div className="menu-tools"><label><Search/><span className="sr-only">Search menu</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search drinks, cakes, and meals"/></label><div className="menu-chip-row">{categories.map(c=><button className={`category-chip ${c===category?'active':''} ${c===chipMotion?'is-switching':''}`.trim()} onClick={()=>{setChipMotion(c);setCategory(c)}} key={c} type="button">{c}</button>)}</div></div>{loading?<section className="customer-state">Loading today’s menu…</section>:error?<section className="customer-state error-state"><h2>We couldn’t load the menu.</h2><p>{error}</p></section>:<section className="customer-products menu-results-grid" key={`${category}-${query}`}>{filtered.map(p=><ProductCard key={p.id} product={p} onAddToCart={addToCart} onPreview={openProduct}/>)}</section>}
     {modal}
   </main>
@@ -60,6 +62,7 @@ const orderStatusTone=status=>{
   if(normalized==='out for delivery')return 'status-chip--delivery'
   if(normalized==='ready for pickup')return 'status-chip--pickup'
   if(normalized==='completed')return 'status-chip--completed'
+  if(normalized==='received')return 'status-chip--completed'
   if(normalized==='cancelled')return 'status-chip--cancelled'
   return 'status-chip--neutral'
 }
@@ -71,21 +74,24 @@ const completionMessage=order=>orderPaymentMethod(order)==='cod'?'Your order has
 const completionNote=order=>{const notes=[];if(orderPaymentMethod(order)==='cod')notes.push('Please prepare the exact amount. Payment will be collected upon delivery.');else notes.push('Your order will be processed after the payment proof is verified.');if((order?.order_type||order?.fulfillment)==='pickup')notes.push('You will be notified when your order is ready for pickup.');return notes.join(' ')}
 const estimatedTimeLabel=order=>((order?.order_type||order?.fulfillment)==='pickup'?'Estimated ready time':'Estimated delivery time')
 const mergePlacedOrderData=({order,form,items,total})=>{const payment=orderPaymentMethod(order)||form.payment;const fulfillment=order?.order_type||order?.fulfillment||form.fulfillment;return {...order,payment_method:payment,payment_status:order?.payment_status||'pending',payments:order?.payments?.length?order.payments:[{method:payment,status:order?.payment_status||'pending'}],order_type:fulfillment,schedule_date:order?.schedule_date||form.scheduleDate,schedule_time:order?.schedule_time||form.scheduleTime,delivery_address:order?.delivery_address||(fulfillment==='delivery'?`${form.address}, Brgy. ${form.barangay}, ${form.city}, ${form.province} ${form.postal}`:''),final_total:Number(order?.final_total??order?.total??total??0),total:Number(order?.total??order?.final_total??total??0),order_items:order?.order_items?.length?order.order_items:items.map(item=>({id:item.lineId,quantity:item.quantity}))}}
-const trackingSteps=order=>((order?.order_type||order?.fulfillment)==='pickup'?[initialOrderStatusLabel(orderPaymentMethod(order)),'Confirmed','Preparing','Ready for Pickup','Completed']:[initialOrderStatusLabel(orderPaymentMethod(order)),'Confirmed','Preparing','Out for Delivery','Completed'])
-const trackingStatusCopy=(order,status)=>status==='Awaiting Payment Verification'?'Your payment proof is waiting for review.':status==='Order Received'?'Your order is waiting for store confirmation.':status==='Confirmed'?`Scheduled for ${orderScheduleLabel(order)}`:status==='Preparing'?'The kitchen and bar are preparing your order.':status==='Out for Delivery'?'Your order is on the way.':status==='Ready for Pickup'?'Your order is ready at the store.':status==='Completed'?'This order has been completed.':'Waiting for update'
+const trackingSteps=order=>((order?.order_type||order?.fulfillment)==='pickup'?[initialOrderStatusLabel(orderPaymentMethod(order)),'Confirmed','Preparing','Ready for Pickup','Completed']:[initialOrderStatusLabel(orderPaymentMethod(order)),'Confirmed','Preparing','Out for Delivery','Received'])
+const trackingStatusCopy=(order,status)=>status==='Awaiting Payment Verification'?'Your payment proof is waiting for review.':status==='Order Received'?'Your order is waiting for store confirmation.':status==='Confirmed'?`Scheduled for ${orderScheduleLabel(order)}`:status==='Preparing'?'The kitchen and bar are preparing your order.':status==='Out for Delivery'?'Your order is on the way. Confirm once it arrives.':status==='Ready for Pickup'?'Your order is ready at the store.':status==='Received'?'You confirmed that this delivery was received.':status==='Completed'?'This order has been completed.':'Waiting for update'
 const clockMinutes=(value,fallback)=>{const [hour,minute]=String(value||'').split(':').map(Number);return Number.isFinite(hour)&&Number.isFinite(minute)?hour*60+minute:fallback}
+const emptyCheckoutForm=()=>({fullName:'',email:'',contact:'',fulfillment:'delivery',address:'',barangay:'',city:'Quezon City',province:'Metro Manila',postal:'',instructions:'',payment:'cod',scheduleDate:'',scheduleTime:'',deliveryFee:0,deliveryZone:'',estimatedDeliveryTime:''})
 function scheduleSlots(date,fulfillment,ordering=SYSTEM_DEFAULTS.ordering){if(!date)return[];const nowParts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date());const nowMap=Object.fromEntries(nowParts.map(part=>[part.type,part.value]));const nowMinutes=(Number(nowMap.hour)%24)*60+Number(nowMap.minute);const buffer=fulfillment==='delivery'?60:30;const earliest=date===manilaDate()?nowMinutes+buffer:-1;const open=clockMinutes(ordering.openTime,STORE_OPEN_MINUTES);const close=clockMinutes(ordering.closeTime,STORE_CLOSE_MINUTES);const slots=[];for(let time=open;time<=close;time+=30){if(date===manilaDate()&&time<=earliest)continue;slots.push({id:`${String(Math.floor(time/60)).padStart(2,'0')}:${String(time%60).padStart(2,'0')}`,name:timeLabel(time)})}return slots}
 export function CheckoutPage(){
-  const {items,subtotal}=useCart();const {user,profile}=useAuth();const {pricing}=usePricing();const navigate=useNavigate();
+  const cart=useCart();const {items,subtotal}=cart;const {user,profile}=useAuth();const {pricing}=usePricing();const navigate=useNavigate();
   const [submitError,setSubmitError]=useState('');
   const [systemSettings,setSystemSettings]=useState(SYSTEM_DEFAULTS);
   const [availableAreas,setAvailableAreas]=useState(deliveryAreas);
-  const [addresses,setAddresses]=useState([]);const [selectedAddress,setSelectedAddress]=useState('');const [makeDefaultOnSelect,setMakeDefaultOnSelect]=useState(false);
-  const [form,setForm]=useState({fullName:'',email:'',contact:'',fulfillment:'delivery',address:'',barangay:'',city:'Quezon City',province:'Metro Manila',postal:'',instructions:'',payment:'cod',scheduleDate:'',scheduleTime:'',deliveryFee:0,deliveryZone:'',estimatedDeliveryTime:''});
+  const [addresses,setAddresses]=useState([]);const [selectedAddress,setSelectedAddress]=useState('');const [addressMode,setAddressMode]=useState('loading');const [draftReady,setDraftReady]=useState(false);const [requestKey,setRequestKey]=useState(()=>crypto.randomUUID());
+  const [form,setForm]=useState(emptyCheckoutForm);
+  useEffect(()=>{if(!user?.id)return;const draft=readCheckoutDraft(user.id);if(draft){setForm({...emptyCheckoutForm(),...draft.form});setAddressMode(['saved','new'].includes(draft.addressMode)?draft.addressMode:'new');setSelectedAddress(String(draft.selectedAddress||''));setRequestKey(draft.requestKey||crypto.randomUUID())}else{setAddressMode('loading')}setDraftReady(true)},[user?.id]);
+  useEffect(()=>{if(!draftReady||!user?.id||addressMode==='loading')return undefined;const timeout=window.setTimeout(()=>writeCheckoutDraft(user.id,{form,addressMode,selectedAddress,requestKey}),120);return()=>window.clearTimeout(timeout)},[addressMode,draftReady,form,requestKey,selectedAddress,user?.id]);
   useEffect(()=>{setForm(current=>({...current,fullName:current.fullName||profile?.full_name||profile?.name||'',email:current.email||profile?.email||user?.email||'',contact:current.contact||normalizePhone(profile?.contact_number||profile?.phone||'')}))},[profile,user]);
   useEffect(()=>{let active=true;fetchPublicPortalData().then(data=>{if(!active)return;setSystemSettings(data.system);setForm(current=>{const delivery=data.system.ordering.deliveryEnabled;const pickup=data.system.ordering.pickupEnabled;const fulfillment=current.fulfillment==='delivery'&&!delivery&&pickup?'pickup':current.fulfillment==='pickup'&&!pickup&&delivery?'delivery':current.fulfillment;const methods=data.system.payments.enabledMethods||[];const allowed=fulfillment==='delivery'?methods:methods.filter(method=>method!=='cod');return {...current,fulfillment,payment:allowed.includes(current.payment)?current.payment:(allowed[0]||'')}})}).catch(()=>{});return()=>{active=false}},[]);
   useEffect(()=>{let active=true;fetchPublicDeliveryAreas().then(data=>{if(active&&data.length)setAvailableAreas(data)}).catch(()=>{});return()=>{active=false}},[])
-  useEffect(()=>{let active=true;if(!user?.id)return undefined;fetchAddresses(user.id).then(data=>{
+  useEffect(()=>{let active=true;if(!user?.id||!draftReady)return undefined;fetchAddresses(user.id).then(data=>{
     if(!active)return
     const list=data||[]
     setAddresses(list)
@@ -93,29 +99,41 @@ export function CheckoutPage(){
     // never a stale/cached one, and never silently overwrite an address the
     // customer is already actively editing on this page.
     const defaultAddress=list.find(address=>address.is_default)
-    if(defaultAddress&&!selectedAddress)applyAddress(defaultAddress)
-  }).catch(()=>{if(active)setAddresses([])});return()=>{active=false}},[user]);
+    setAddressMode(currentMode=>{
+      if(defaultAddress&&currentMode!=='new'){
+        setSelectedAddress(String(defaultAddress.id))
+        setForm(current=>({...current,address:defaultAddress.address_line||'',barangay:defaultAddress.barangay||'',city:defaultAddress.city||'Quezon City',province:defaultAddress.province||'Metro Manila',postal:defaultAddress.postal_code||''}))
+        return 'saved'
+      }
+      return currentMode==='loading'||currentMode==='saved'?'new':currentMode
+    })
+  }).catch(()=>{if(active){setAddresses([]);setAddressMode(current=>current==='loading'||current==='saved'?'new':current)}});return()=>{active=false}},[draftReady,user?.id]);
   const applyAddress=address=>{
     setSelectedAddress(String(address.id))
-    setMakeDefaultOnSelect(false)
+    setAddressMode('saved')
     setForm(current=>({...current,address:address.address_line||'',barangay:address.barangay||'',city:address.city||'Quezon City',province:address.province||'Metro Manila',postal:address.postal_code||''}))
+  }
+  const defaultAddress=addresses.find(address=>address.is_default)||null
+  const chooseAddressMode=mode=>{
+    if(mode==='saved'&&defaultAddress){applyAddress(defaultAddress);return}
+    setAddressMode('new')
+    setSelectedAddress('')
+    setForm(current=>({...current,address:'',barangay:'',city:'Quezon City',province:'Metro Manila',postal:''}))
   }
   const selectedArea=availableAreas.find(area=>area.barangay.toLowerCase()===form.barangay.trim().toLowerCase());const fee=form.fulfillment==='delivery'?(selectedArea?.fee||0):0;const total=subtotal+fee;const slots=useMemo(()=>scheduleSlots(form.scheduleDate,form.fulfillment,systemSettings.ordering),[form.scheduleDate,form.fulfillment,systemSettings.ordering]);
   if(!items.length)return <Empty title="Nothing to checkout" body="Your cart needs at least one item." action="Browse menu" to="/menu"/>;
+  if(cart.checkingAvailability)return <main className="customer-main"><section className="customer-state">Checking your cart against today’s availability…</section></main>;
+  if(cart.hasUnavailableItems)return <main className="customer-main"><section className="empty-state"><AlertTriangle/><h1>Update your cart</h1><p>Remove unavailable items before continuing to checkout.</p><button className="primary-button" type="button" onClick={cart.openCart}>Review cart</button></section></main>;
   const set=(key,value)=>setForm(current=>({...current,[key]:value}));
   const setFulfillment=value=>setForm(current=>{const allowed=(systemSettings.payments.enabledMethods||[]).filter(method=>value==='delivery'||method!=='cod');return {...current,fulfillment:value,payment:allowed.includes(current.payment)?current.payment:(allowed[0]||''),scheduleDate:'',scheduleTime:''}});
-  const chooseAddress=id=>{const saved=addresses.find(address=>String(address.id)===String(id));if(!saved)return;applyAddress(saved)};
   const submit=async event=>{
     event.preventDefault();setSubmitError('');if(systemSettings.ordering.storeStatus!=='open'){setSubmitError(systemSettings.ordering.closureMessage);return}if(subtotal<Number(systemSettings.ordering.minimumOrder||0)){setSubmitError(`A minimum order of ${money(systemSettings.ordering.minimumOrder)} is required.`);return}if(!/^\d{11}$/.test(form.contact)){setSubmitError('Contact number must contain exactly 11 digits.');return}if(form.fulfillment==='delivery'&&!/^\d{4,6}$/.test(form.postal)){setSubmitError('Postal code must contain 4 to 6 digits only.');return}if(form.fulfillment==='delivery'&&!selectedArea)return
-    // Selecting a saved address never changes the customer's default unless
-    // they explicitly opt in here.
-    if(makeDefaultOnSelect&&selectedAddress){try{await setDefaultAddress(selectedAddress)}catch{/* non-fatal: proceed with checkout regardless */}}
-    const checkout={...form,deliveryFee:fee,deliveryZone:selectedArea?.zone||'',estimatedDeliveryTime:selectedArea?.estimatedTime||''};navigate('/checkout/review',{state:{checkout}})
+    const checkout={...form,deliveryFee:fee,deliveryZone:selectedArea?.zone||'',estimatedDeliveryTime:selectedArea?.estimatedTime||''};writeCheckoutDraft(user.id,{form:checkout,addressMode,selectedAddress,requestKey});navigate('/checkout/review',{state:{checkout}})
   };
   return <main className="customer-main checkout-page"><section className="page-title"><span>Secure checkout</span><h1>How should we prepare your order?</h1></section><div className="checkout-layout"><form className="checkout-form" onSubmit={submit}>
-    <CheckoutSection n="1" title="Customer information"><div className="form-grid"><Field label="Full name" value={form.fullName} onChange={value=>set('fullName',value)}/><Field label="Email address" type="email" value={form.email} onChange={value=>set('email',value)}/><Field label="Contact number" type="tel" value={form.contact} onChange={value=>set('contact',normalizePhone(value))} inputMode="numeric" maxLength={11} pattern="[0-9]{11}" title="Contact number must contain exactly 11 digits."/></div>{submitError&&<p className="field-hint error">{submitError}</p>}</CheckoutSection>
+    <CheckoutSection n="1" title="Customer information"><div className="form-grid"><Field label="Full name" value={form.fullName} onChange={value=>set('fullName',value)}/><Field label="Contact number" type="tel" value={form.contact} onChange={value=>set('contact',normalizePhone(value))} inputMode="numeric" maxLength={11} pattern="[0-9]{11}" title="Contact number must contain exactly 11 digits."/></div>{submitError&&<p className="field-hint error">{submitError}</p>}</CheckoutSection>
     <CheckoutSection n="2" title="Fulfillment"><Choice title="Method" options={[systemSettings.ordering.deliveryEnabled&&{id:'delivery',name:'Delivery'},systemSettings.ordering.pickupEnabled&&{id:'pickup',name:'Store pickup'}].filter(Boolean)} value={form.fulfillment} onChange={setFulfillment}/><div className="schedule-fields"><Choice title={`${form.fulfillment==='delivery'?'Delivery':'Pickup'} day`} options={scheduleDates} value={form.scheduleDate} onChange={value=>setForm(current=>({...current,scheduleDate:value,scheduleTime:''}))}/><SelectField label="Time" value={form.scheduleTime} onChange={value=>set('scheduleTime',value)} options={slots} placeholder={form.scheduleDate?(slots.length?'Select time':'No slots available — choose Tomorrow'):'Select a day first'} disabled={!form.scheduleDate||!slots.length}/></div>
-    {form.fulfillment==='delivery'?<>{addresses.length>0&&<div className="saved-address-picker"><Choice title="Choose from saved addresses" options={addresses.map((address,index)=>({id:String(address.id),name:address.label||`Address ${index+1}`}))} value={String(selectedAddress)} onChange={chooseAddress}/>{selectedAddress&&!addresses.find(address=>String(address.id)===String(selectedAddress))?.is_default&&<label className="check-choice"><input type="checkbox" checked={makeDefaultOnSelect} onChange={event=>setMakeDefaultOnSelect(event.target.checked)}/><span>Make this my default address</span></label>}</div>}<div className="form-grid"><Field label="House no. / Bldg. / Street / Village" value={form.address} onChange={value=>set('address',value)}/><BarangayField areas={availableAreas} value={form.barangay} onChange={value=>set('barangay',value)} selectedArea={selectedArea}/><Field label="City" value={form.city} readOnly/><Field label="Province" value={form.province} readOnly/><Field label="Postal code" type="tel" value={form.postal} onChange={value=>set('postal',normalizePostal(value))} inputMode="numeric" maxLength={6} pattern="[0-9]{4,6}" title="Postal code must contain 4 to 6 digits only."/></div>{form.barangay&&!selectedArea&&<p className="field-hint error">Please select a Barangay from the delivery list.</p>}</>:<div className="pickup-note"><MapPin/>Lot 1 Block 210 Mark Street corner Dollar Street, North Fairview</div>}<Field label={form.fulfillment==='delivery'?'Delivery instructions':'Pickup note (optional)'} value={form.instructions} onChange={value=>set('instructions',value)} required={false}/></CheckoutSection>
+    {form.fulfillment==='delivery'?<><fieldset className="address-source-picker"><legend>Delivery address</legend><div><button type="button" className={addressMode==='saved'?'active':''} onClick={()=>chooseAddressMode('saved')} disabled={!defaultAddress} aria-pressed={addressMode==='saved'}><span><MapPin size={19}/></span><b>Use default address</b><small>{defaultAddress?(defaultAddress.label||'Saved address'):'No default address saved'}</small></button><button type="button" className={addressMode==='new'?'active':''} onClick={()=>chooseAddressMode('new')} aria-pressed={addressMode==='new'}><span><Pencil size={19}/></span><b>Enter a new address</b><small>Use a different delivery location</small></button></div></fieldset>{addressMode==='saved'&&defaultAddress?<div className="saved-address-summary"><span>Default address</span><strong>{defaultAddress.label||'Saved address'}</strong><p>{[defaultAddress.address_line,defaultAddress.barangay&&`Brgy. ${defaultAddress.barangay}`,defaultAddress.city,defaultAddress.province,defaultAddress.postal_code].filter(Boolean).join(', ')}</p></div>:<div className="form-grid"><Field label="House no. / Bldg. / Street / Village" value={form.address} onChange={value=>set('address',value)}/><BarangayField areas={availableAreas} value={form.barangay} onChange={value=>set('barangay',value)} selectedArea={selectedArea}/><Field label="City" value={form.city} readOnly/><Field label="Province" value={form.province} readOnly/><Field label="Postal code" type="tel" value={form.postal} onChange={value=>set('postal',normalizePostal(value))} inputMode="numeric" maxLength={6} pattern="[0-9]{4,6}" title="Postal code must contain 4 to 6 digits only."/></div>}{form.barangay&&!selectedArea&&<p className="field-hint error">Please select a Barangay from the delivery list.</p>}</>:<div className="pickup-note"><MapPin/>Lot 1 Block 210 Mark Street corner Dollar Street, North Fairview</div>}<Field label={form.fulfillment==='delivery'?'Delivery instructions':'Pickup note (optional)'} value={form.instructions} onChange={value=>set('instructions',value)} required={false}/></CheckoutSection>
     <CheckoutSection n="3" title="Payment"><Choice title="Payment method" options={(systemSettings.payments.enabledMethods||[]).filter(method=>form.fulfillment==='delivery'||method!=='cod').map(method=>({id:method,name:method==='cod'?'Cash on delivery':method==='bank_transfer'?'Bank':'GCash'}))} value={form.payment} onChange={value=>set('payment',value)}/></CheckoutSection>
     {systemSettings.ordering.storeStatus!=='open'&&<p className="field-hint error">{systemSettings.ordering.closureMessage}</p>}
     <button className="primary-button checkout-submit" disabled={systemSettings.ordering.storeStatus!=='open'||!form.payment||!form.scheduleDate||!form.scheduleTime||(form.fulfillment==='delivery'&&!selectedArea)}>Review order · {money(total)} <ArrowRight/></button>
@@ -130,7 +148,7 @@ function PaymentConfirmationModal({payment,total,paymentConfig=SYSTEM_DEFAULTS.p
   const isCod=payment==='cod';const isBank=payment==='bank_transfer';const title=isCod?'Confirm Cash on Delivery':isBank?'Bank transfer instructions':'GCash payment instructions';const qr=isBank?(paymentConfig.bankQrUrl||'/assets/img/qr1.jpg'):(paymentConfig.gcashQrUrl||'/assets/img/qr.jpg');const codMaximum=Number(paymentConfig.codMaximum||1000);const instructions=isBank?paymentConfig.bankInstructions:paymentConfig.gcashInstructions
   return <div className="payment-modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)onClose()}}><section className="payment-modal order-flow-modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title"><button className="payment-modal-close" type="button" onClick={onClose} disabled={busy} aria-label="Close payment dialog">×</button><span className="payment-modal-kicker">{isCod?'Before placing your order':'Complete your payment'}</span><h2 id="payment-modal-title">{title}</h2><div className="payment-modal-total"><span>Amount due</span><strong>{money(total)}</strong></div>{isCod?<><p>Your order will be paid when it arrives. Please confirm that you understand these rules:</p><ul><li>Cash on Delivery is available for delivery orders only.</li><li>COD is available for orders up to {money(codMaximum)}.</li><li>Please prepare the exact amount whenever possible.</li><li>The order is still subject to store confirmation and availability.</li></ul>{total>codMaximum&&<p className="payment-modal-warning">This order exceeds the COD limit. Go back and select GCash or Bank.</p>}</>:<div className="digital-payment-guide"><img src={qr} alt={`${isBank?'Bank':'GCash'} payment QR code`}/><div><p>{instructions}</p>{isBank&&paymentConfig.bankName&&<p><b>{paymentConfig.bankName}</b>{paymentConfig.bankAccountName?` · ${paymentConfig.bankAccountName}`:''}{paymentConfig.bankAccountNumber?` · ${paymentConfig.bankAccountNumber}`:''}</p>}<ol><li>Send the exact total shown above.</li><li>Use your full name as the payment reference.</li><li>Save a clear screenshot or receipt after payment succeeds.</li><li>Continue to upload your proof of payment.</li></ol></div></div>}<div className="payment-modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Go back</button><button className="primary-button" type="button" onClick={onConfirm} disabled={busy||(isCod&&total>codMaximum)}>{busy?'Placing order…':isCod?'Confirm COD order':'Continue to upload'}</button></div></section></div>
 }
-function ProofUploadModal({payment,busy,error,onBack,onSubmit}){const [file,setFile]=useState(null);const [fileError,setFileError]=useState('');const choose=event=>{const next=event.target.files?.[0]||null;const allowed=['image/jpeg','image/png','image/webp'];if(next&&!allowed.includes(next.type)){setFile(null);setFileError('Only JPG, PNG, and WEBP images are accepted. GIF, PDF, and documents are not allowed.');event.target.value='';return}if(next&&next.size>5*1024*1024){setFile(null);setFileError('The image is larger than 5 MB. Choose a smaller file.');event.target.value='';return}setFile(next);setFileError('')};return <div className="payment-modal-backdrop"><section className="payment-modal proof-modal" role="dialog" aria-modal="true" aria-labelledby="proof-modal-title"><span className="payment-modal-kicker">{payment==='bank_transfer'?'Bank transfer':'GCash'} payment</span><h2 id="proof-modal-title">Upload proof of payment</h2><p>Upload a clear image showing the successful transaction. The system will securely rename it using the order ID and payment date.</p><label className="proof-dropzone"><input type="file" accept="image/jpeg,image/png,image/webp" onChange={choose}/><ShoppingBag/><strong>{file?file.name:'Choose payment screenshot'}</strong><small>JPG, PNG, or WEBP only · Maximum 5 MB</small></label>{file&&<div className="proof-file"><span>{file.name}</span><b>{(file.size/1024/1024).toFixed(2)} MB</b></div>}{(fileError||error)&&<p className="payment-modal-warning" role="alert">{fileError||error}</p>}<div className="payment-modal-actions"><button className="secondary-button" type="button" onClick={onBack} disabled={busy}>Back to instructions</button><button className="primary-button" type="button" onClick={()=>file&&onSubmit(file)} disabled={!file||busy}>{busy?'Uploading and placing order…':'Submit proof and order'}</button></div></section></div>}
+function ProofUploadModal({payment,busy,error,onBack,onSubmit}){const [file,setFile]=useState(null);const [fileError,setFileError]=useState('');const choose=async event=>{const next=event.target.files?.[0]||null;if(!next)return;try{await validateImageFile(next,{label:'Payment proof'});setFile(next);setFileError('')}catch(cause){setFile(null);setFileError(cause.message||'Could not use this image.')}event.target.value=''};return <div className="payment-modal-backdrop"><section className="payment-modal proof-modal" role="dialog" aria-modal="true" aria-labelledby="proof-modal-title"><span className="payment-modal-kicker">{payment==='bank_transfer'?'Bank transfer':'GCash'} payment</span><h2 id="proof-modal-title">Upload proof of payment</h2><p>Upload a clear image showing the successful transaction. The system will securely rename it using the order ID and payment date.</p><label className="proof-dropzone"><input type="file" accept={IMAGE_UPLOAD_ACCEPT} onChange={choose}/><ShoppingBag/><strong>{file?file.name:'Choose payment screenshot'}</strong><small>JPG, PNG, or WEBP only · Maximum 5 MB</small></label>{file&&<div className="proof-file"><span>{file.name}</span><b>{(file.size/1024/1024).toFixed(2)} MB</b></div>}{(fileError||error)&&<p className="payment-modal-warning" role="alert">{fileError||error}</p>}<div className="payment-modal-actions"><button className="secondary-button" type="button" onClick={onBack} disabled={busy}>Back to instructions</button><button className="primary-button" type="button" onClick={()=>file&&onSubmit(file)} disabled={!file||busy}>{busy?'Uploading and placing order…':'Submit proof and order'}</button></div></section></div>}
 function OrderCompleteModal({order,freshOrder=false,fallbackEstimatedTime='',onTrack,onContinue}){
   const [copied,setCopied]=useState(false)
   const orderNumber=order?.order_number||order?.reference_code||order?.order_id||order?.id
@@ -185,8 +203,10 @@ function OrderCompleteModal({order,freshOrder=false,fallbackEstimatedTime='',onT
   </div>
 }
 export function OrderReviewPage(){
-  const {state}=useLocation();const navigate=useNavigate();const {signOut}=useAuth();const {items,subtotal,clearCart}=useCart();const {pricing}=usePricing();const [requestKey]=useState(()=>crypto.randomUUID());const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [modal,setModal]=useState(null);const [createdOrder,setCreatedOrder]=useState(null);const [freshOrder,setFreshOrder]=useState(false);const [paymentConfig,setPaymentConfig]=useState(SYSTEM_DEFAULTS.payments);const form=state?.checkout;
+  const {state}=useLocation();const navigate=useNavigate();const {user,signOut}=useAuth();const cart=useCart();const {items,subtotal,clearCart}=cart;const {pricing}=usePricing();const savedDraft=readCheckoutDraft(user?.id);const form=state?.checkout||savedDraft?.form;const [requestKey]=useState(()=>savedDraft?.requestKey||crypto.randomUUID());const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [modal,setModal]=useState(null);const [createdOrder,setCreatedOrder]=useState(null);const [freshOrder,setFreshOrder]=useState(false);const [paymentConfig,setPaymentConfig]=useState(SYSTEM_DEFAULTS.payments);
   useEffect(()=>{let active=true;fetchPublicPortalData().then(data=>{if(active)setPaymentConfig(data.system.payments)}).catch(()=>{});return()=>{active=false}},[])
+  if(cart.checkingAvailability)return <main className="customer-main"><section className="customer-state">Checking your cart against today’s availability…</section></main>;
+  if(cart.hasUnavailableItems)return <main className="customer-main"><section className="empty-state"><AlertTriangle/><h1>Update your cart</h1><p>One or more items became unavailable. Remove them before placing the order.</p><button className="primary-button" type="button" onClick={()=>{cart.openCart();navigate('/menu',{replace:true})}}>Review cart</button></section></main>;
   if(!form||!items.length)return <NotFoundPage/>;
   const fee=form.fulfillment==='delivery'?Number(form.deliveryFee||0):0;const total=subtotal+fee;const {baseAmount,vatAmount}=vatBreakdownFromInclusiveAmount(subtotal,pricing.vatRate,pricing.pricesIncludeVat);
   const place=async proof=>{
@@ -216,6 +236,7 @@ export function OrderReviewPage(){
       try{const refreshed=await fetchCustomerOrder(orderId);if(refreshed)order=mergePlacedOrderData({order:refreshed,form,items,total})}catch{/* fall back to the freshly created order snapshot */}
       setCreatedOrder(order)
       setFreshOrder(true)
+      clearCheckoutDraft(sessionCheck.user.id)
       setModal('complete')
     }catch(cause){
       setError(describeError(cause,'Could not place the order. Please try again.'))
@@ -236,8 +257,8 @@ const customerCancellationNeedsReview=order=>{
   return Boolean(paid||(orderPaymentMethod(order)!=='cod'&&order?.payment_proof_path))
 }
 const CANCEL_REASONS=['Ordered by mistake','Wrong items or quantities','Wrong delivery address','Wrong payment method','Duplicate order','Delivery or preparation time is too long','Changed my mind','Other']
-const STATUS_MESSAGE={'Order Received':'Waiting for the shop to confirm your order.','Awaiting Payment Verification':'Your payment proof is being reviewed.','Confirmed':'Your order has been confirmed.','Preparing':'Your order is currently being prepared.','Ready for Pickup':'Your order is ready for pickup.','Out for Delivery':'Your order is on the way.','Completed':'Your order has been completed.','Cancelled':'This order was cancelled.'}
-const STATUS_ICON={'Order Received':Receipt,'Awaiting Payment Verification':CreditCard,'Confirmed':PackageCheck,'Preparing':Coffee,'Ready for Pickup':ShoppingBag,'Out for Delivery':Bike,'Completed':PartyPopper,'Cancelled':XCircle}
+const STATUS_MESSAGE={'Order Received':'Waiting for the shop to confirm your order.','Awaiting Payment Verification':'Your payment proof is being reviewed.','Confirmed':'Your order has been confirmed.','Preparing':'Your order is currently being prepared.','Ready for Pickup':'Your order is ready for pickup.','Out for Delivery':'Your order is on the way. Confirm receipt once it arrives.','Received':'You confirmed that your delivery was received.','Completed':'Your order has been completed.','Cancelled':'This order was cancelled.'}
+const STATUS_ICON={'Order Received':Receipt,'Awaiting Payment Verification':CreditCard,'Confirmed':PackageCheck,'Preparing':Coffee,'Ready for Pickup':ShoppingBag,'Out for Delivery':Bike,'Received':PartyPopper,'Completed':PartyPopper,'Cancelled':XCircle}
 const backdropMotion={initial:{opacity:0},animate:{opacity:1},exit:{opacity:0},transition:{duration:0.18}}
 const modalMotion={initial:{opacity:0,scale:0.97,y:8},animate:{opacity:1,scale:1,y:0},exit:{opacity:0,scale:0.98,y:6},transition:{duration:0.2,ease:[0.22,1,0.36,1]}}
 const drawerPanelMotion={initial:{x:'100%'},animate:{x:0},exit:{x:'100%'},transition:{duration:0.26,ease:[0.22,1,0.36,1]}}
@@ -260,6 +281,8 @@ export function MyOrdersPage(){
   const [feedbackOrder,setFeedbackOrder]=useState(null)
   const [reorderState,setReorderState]=useState(null)
   const [toast,setToast]=useState('')
+  const [receiveError,setReceiveError]=useState('')
+  const [receivingId,setReceivingId]=useState('')
   const {addItem}=useCart()
   const {products}=useMenuCatalog()
   const load=()=>{
@@ -273,12 +296,27 @@ export function MyOrdersPage(){
   useEffect(()=>{load()},[user])
   useEffect(()=>{if(!toast)return undefined;const t=setTimeout(()=>setToast(''),4000);return()=>clearTimeout(t)},[toast])
 
-  const currentOrders=orders.filter(o=>!['Completed','Cancelled'].includes(o.status))
-  const pastOrders=orders.filter(o=>o.status==='Completed')
+  const currentOrders=orders.filter(o=>!['Completed','Received','Cancelled'].includes(o.status))
+  const pastOrders=orders.filter(o=>['Completed','Received'].includes(o.status))
   const cancelledOrders=orders.filter(o=>o.status==='Cancelled')
   const visiblePast=pastOrders.slice(0,pastPage*6)
 
   const patchOrder=(id,patch)=>setOrders(current=>current.map(o=>o.id===id?{...o,...patch}:o))
+
+  const runReceive=async order=>{
+    if(receivingId)return
+    setReceivingId(order.id);setReceiveError('')
+    try{
+      await confirmCustomerOrderReceived(order.id)
+      patchOrder(order.id,{status:'Received',received_at:new Date().toISOString(),receipt_confirmation:'customer'})
+      setTrackOrder(null)
+      setToast(`${customerOrderNumber(order.order_number)} was marked as received.`)
+    }catch(cause){
+      setReceiveError(describeError(cause,'Could not confirm that this order was received.'))
+    }finally{
+      setReceivingId('')
+    }
+  }
 
   const runCancel=async(reason,notes)=>{
     const order=cancelOrder
@@ -323,10 +361,11 @@ export function MyOrdersPage(){
       <button className={tab==='cancelled'?'active':''} onClick={()=>setTab('cancelled')}>Cancelled Orders</button>
     </div>
     {toast&&<p className="settings-status" role="status">{toast}</p>}
+    {receiveError&&<p className="form-error" role="alert">{receiveError}</p>}
     {loading?<OrdersSkeleton/>:error?<section className="customer-state error-state"><h2>We couldn't load your orders.</h2><p>{error}</p></section>:<>
       {tab==='current'&&(currentOrders.length===0?<EmptyOrders hasAny={orders.length>0} label="current orders"/>:
         <section className="current-orders-list">{currentOrders.map((order,index)=><CurrentOrderCard key={order.id} order={order} addonNames={addonNames} index={index}
-          onView={()=>setDetailOrder(order)} onCancel={()=>setCancelOrderTarget(order)} onTrack={()=>setTrackOrder(order)}/>)}</section>)}
+          onView={()=>setDetailOrder(order)} onCancel={()=>setCancelOrderTarget(order)} onTrack={()=>setTrackOrder(order)} onReceive={()=>runReceive(order)} receiving={receivingId===order.id}/>)}</section>)}
       {tab==='past'&&(pastOrders.length===0?<EmptyOrders hasAny={orders.length>0} label="past orders"/>:<>
         <section className="orders-grid">{visiblePast.map((order,index)=><PastOrderCard key={order.id} order={order} index={index}
           onView={()=>setDetailOrder(order)} onReceipt={()=>setReceiptOrder(order)}
@@ -338,7 +377,7 @@ export function MyOrdersPage(){
         <section className="orders-grid">{cancelledOrders.map((order,index)=><CancelledOrderCard key={order.id} order={order} index={index} onView={()=>setDetailOrder(order)}/>)}</section>)}
     </>}
     <AnimatePresence>{detailOrder&&<OrderDetailsDrawer order={orders.find(o=>o.id===detailOrder.id)||detailOrder} addonNames={addonNames} onClose={()=>setDetailOrder(null)}/>}</AnimatePresence>
-    <AnimatePresence>{trackOrder&&<TrackOrderModal order={orders.find(o=>o.id===trackOrder.id)||trackOrder} onClose={()=>setTrackOrder(null)}/>}</AnimatePresence>
+    <AnimatePresence>{trackOrder&&<TrackOrderModal order={orders.find(o=>o.id===trackOrder.id)||trackOrder} onClose={()=>setTrackOrder(null)} onReceive={()=>runReceive(orders.find(o=>o.id===trackOrder.id)||trackOrder)} receiving={receivingId===trackOrder.id}/>}</AnimatePresence>
     <AnimatePresence>{cancelOrder&&<CancelOrderModal order={cancelOrder} onClose={()=>setCancelOrderTarget(null)} onConfirm={runCancel}/>}</AnimatePresence>
     <AnimatePresence>{receiptOrder&&<ReceiptModal order={receiptOrder} addonNames={addonNames} onClose={()=>setReceiptOrder(null)}/>}</AnimatePresence>
     <AnimatePresence>{feedbackOrder&&<FeedbackModal order={feedbackOrder} userId={user?.id} onClose={()=>setFeedbackOrder(null)} onDone={()=>setToast('Thanks for your feedback!')}/>}</AnimatePresence>
@@ -359,7 +398,7 @@ function OrderItemsSummary({order,addonNames,compact}){
 
 const cardEnter=index=>({initial:{opacity:0,y:10},animate:{opacity:1,y:0},transition:{duration:0.28,delay:Math.min(index*0.05,0.3),ease:[0.22,1,0.36,1]}})
 
-function CurrentOrderCard({order,addonNames,onView,onCancel,onTrack,index=0}){
+function CurrentOrderCard({order,addonNames,onView,onCancel,onTrack,onReceive,receiving,index=0}){
   const status=orderStatusLabel(order)
   const steps=trackingSteps(order)
   const currentIndex=Math.max(steps.indexOf(status),0)
@@ -379,6 +418,7 @@ function CurrentOrderCard({order,addonNames,onView,onCancel,onTrack,index=0}){
     <div className="order-card-actions">
       <button className="secondary-button" type="button" onClick={onView}>View Details</button>
       <button className="primary-button" type="button" onClick={onTrack}>Track Order</button>
+      {status==='Out for Delivery'&&order.order_type==='delivery'&&<button className="primary-button order-received-button" type="button" onClick={onReceive} disabled={receiving}><Check size={15}/> {receiving?'Confirming…':'Order Received'}</button>}
       {canCustomerCancel(order)&&<button className="text-button danger" type="button" onClick={onCancel}>Cancel Order</button>}
     </div>
     {isCancellationReview(order)?<p className="order-cancellation-review-hint"><AlertTriangle size={14}/> We will email you after the store reviews your request.</p>:!canCustomerCancel(order)&&<p className="order-cancel-hint">This order can no longer be cancelled because preparation may have already started.</p>}
@@ -394,7 +434,7 @@ function PastOrderCard({order,onView,onReceipt,onReorder,onFeedback,reordering,i
       <button className="secondary-button" type="button" onClick={onReorder} disabled={reordering}><RotateCcw size={14}/> {reordering?'Adding…':'Reorder'}</button>
       <button className="secondary-button" type="button" onClick={onView}>View</button>
       <button className="secondary-button" type="button" onClick={onReceipt}><Printer size={14}/> Receipt</button>
-      {status==='Completed'&&<button className="primary-button" type="button" onClick={onFeedback}><Star size={14}/> Feedback</button>}
+      {['Completed','Received'].includes(status)&&<button className="primary-button" type="button" onClick={onFeedback}><Star size={14}/> Feedback</button>}
     </div>
   </motion.article>
 }
@@ -582,7 +622,7 @@ function ReorderResultModal({state,onClose}){
   </motion.div>
 }
 
-function TrackOrderModal({order,onClose}){
+function TrackOrderModal({order,onClose,onReceive,receiving}){
   const status=orderStatusLabel(order)
   const steps=trackingSteps(order)
   const currentIndex=Math.max(steps.indexOf(status),0)
@@ -617,20 +657,101 @@ function TrackOrderModal({order,onClose}){
         <span>{orderCount(order)} item{orderCount(order)===1?'':'s'} · {paymentMethodLabel(orderPaymentMethod(order))}</span>
         <b>{money(Number(order.final_total||0))}</b>
       </div>
+      {status==='Out for Delivery'&&order.order_type==='delivery'&&<button className="primary-button full order-received-button" type="button" onClick={onReceive} disabled={receiving}><Check size={16}/> {receiving?'Confirming…':'Confirm Order Received'}</button>}
     </motion.section>
   </motion.div>
 }
 
-export function OrderTrackingPage(){const {id}=useParams();const {state}=useLocation();const [order,setOrder]=useState(state?.order||null);const [loading,setLoading]=useState(!state?.order);const [error,setError]=useState('');const freshOrder=Boolean(state?.freshOrder);useEffect(()=>{let active=true;setLoading(true);fetchCustomerOrder(id).then(data=>{if(!active)return;if(data)setOrder(current=>current?{...current,...data,payments:data.payments?.length?data.payments:current.payments,order_items:data.order_items?.length?data.order_items:current.order_items}:data);setError('')}).catch(cause=>{if(active)setError(cause.message||'Could not load this order.')}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[id]);if(loading&&!order)return <main className="customer-state">Loading order…</main>;if(error&&!order)return <main className="customer-state error-state"><h2>We couldn’t load this order.</h2><p>{error}</p></main>;if(!order)return <NotFoundPage/>;const status=orderStatusLabel(order,{fresh:freshOrder});const steps=trackingSteps(order);const current=Math.max(steps.indexOf(status),0);return <main className="customer-main narrow"><section className="page-title"><span>Live order status</span><h1>Track {customerOrderNumber(order.order_number||id)}</h1></section><section className="tracking-card">{steps.map((step,index)=><div className={index<=current?'done':''} key={step}><span>{index<current?<Check/>:index===current?<Clock3/>:<PackageCheck/>}</span><div><h2>{step}</h2><p>{index===current?trackingStatusCopy(order,status):index<current?'Completed':'Waiting for update'}</p></div></div>)}</section><section className="review-card"><h2>Order details</h2><p>{orderCount(order)} item{orderCount(order)===1?'':'s'} · {paymentMethodLabel(orderPaymentMethod(order))}</p><p>{fulfillmentLabel(order.order_type)}{order.delivery_address?` · ${order.delivery_address}`:''}</p><p>Scheduled for {orderScheduleLabel(order)}</p><strong>Total: {money(Number(order.final_total||0))}</strong></section>{error&&<p className="field-hint error">{error}</p>}</main>}
-export function SettingsPage(){
+export function OrderTrackingPage(){
+  const {id}=useParams()
+  const {state}=useLocation()
+  const [order,setOrder]=useState(state?.order||null)
+  const [loading,setLoading]=useState(!state?.order)
+  const [error,setError]=useState('')
+  const [receiving,setReceiving]=useState(false)
+  const freshOrder=Boolean(state?.freshOrder)
+  useEffect(()=>{
+    let active=true
+    setLoading(true)
+    fetchCustomerOrder(id).then(data=>{
+      if(!active)return
+      if(data)setOrder(current=>current?{...current,...data,payments:data.payments?.length?data.payments:current.payments,order_items:data.order_items?.length?data.order_items:current.order_items}:data)
+      setError('')
+    }).catch(cause=>{if(active)setError(cause.message||'Could not load this order.')}).finally(()=>{if(active)setLoading(false)})
+    return()=>{active=false}
+  },[id])
+  const receive=async()=>{
+    if(!order||receiving)return
+    setReceiving(true);setError('')
+    try{
+      await confirmCustomerOrderReceived(order.id)
+      setOrder(current=>({...current,status:'Received',received_at:new Date().toISOString(),receipt_confirmation:'customer'}))
+    }catch(cause){setError(describeError(cause,'Could not confirm that this order was received.'))}
+    finally{setReceiving(false)}
+  }
+  if(loading&&!order)return <main className="customer-state">Loading order…</main>
+  if(error&&!order)return <main className="customer-state error-state"><h2>We couldn’t load this order.</h2><p>{error}</p></main>
+  if(!order)return <NotFoundPage/>
+  const status=orderStatusLabel(order,{fresh:freshOrder})
+  const steps=trackingSteps(order)
+  const current=Math.max(steps.indexOf(status),0)
+  return <main className="customer-main narrow"><section className="page-title"><span>Live order status</span><h1>Track {customerOrderNumber(order.order_number||id)}</h1></section><section className="tracking-card">{steps.map((step,index)=><div className={index<=current?'done':''} key={step}><span>{index<current?<Check/>:index===current?<Clock3/>:<PackageCheck/>}</span><div><h2>{step}</h2><p>{index===current?trackingStatusCopy(order,status):index<current?'Completed':'Waiting for update'}</p></div></div>)}</section><section className="review-card"><h2>Order details</h2><p>{orderCount(order)} item{orderCount(order)===1?'':'s'} · {paymentMethodLabel(orderPaymentMethod(order))}</p><p>{fulfillmentLabel(order.order_type)}{order.delivery_address?` · ${order.delivery_address}`:''}</p><p>Scheduled for {orderScheduleLabel(order)}</p><strong>Total: {money(Number(order.final_total||0))}</strong>{status==='Out for Delivery'&&order.order_type==='delivery'&&<button className="primary-button full order-received-button" type="button" onClick={receive} disabled={receiving}><Check size={16}/> {receiving?'Confirming…':'Confirm Order Received'}</button>}</section>{error&&<p className="field-hint error">{error}</p>}</main>
+}
+export function ProfilePage(){
   const {profile,user,updateProfile}=useAuth()
   const navigate=useNavigate()
   const otpDigits=6
   const [values,setValues]=useState({full_name:'',email:'',phone:''})
   const [status,setStatus]=useState('')
+  const [statusTone,setStatusTone]=useState('')
+  const [savingProfile,setSavingProfile]=useState(false)
+  const [avatarFile,setAvatarFile]=useState(null)
+  const [avatarPreview,setAvatarPreview]=useState('')
+  const [avatarError,setAvatarError]=useState('')
+  const avatarInputRef=useRef(null)
   useEffect(()=>{setValues({full_name:profile?.full_name||'',email:profile?.email||user?.email||'',phone:profile?.phone||''})},[profile,user])
+  useEffect(()=>()=>{if(avatarPreview)URL.revokeObjectURL(avatarPreview)},[avatarPreview])
   const set=(key,value)=>setValues(current=>({...current,[key]:value}))
-  const submit=async event=>{event.preventDefault();setStatus('Saving…');try{const saved=await saveProfile(user.id,values);updateProfile(saved);setStatus('Profile saved. Checkout will use these details.')}catch(error){setStatus(error.message||'Could not save profile.')}}
+  const avatarUrl=avatarPreview||profile?.avatar_url||''
+  const avatarInitials=(values.full_name||values.email||'Customer').trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()).join('')||'CR'
+  const chooseAvatar=async event=>{
+    const file=event.target.files?.[0]
+    if(!file)return
+    try{
+      await validateProfilePicture(file)
+      setAvatarError('')
+      setAvatarFile(file)
+      setAvatarPreview(URL.createObjectURL(file))
+    }catch(error){
+      setAvatarFile(null)
+      setAvatarPreview('')
+      setAvatarError(error.message||'Could not use this image.')
+      event.target.value=''
+    }
+  }
+  const clearAvatarSelection=()=>{
+    setAvatarFile(null)
+    setAvatarPreview('')
+    setAvatarError('')
+    if(avatarInputRef.current)avatarInputRef.current.value=''
+  }
+  const submit=async event=>{
+    event.preventDefault()
+    if(savingProfile)return
+    setSavingProfile(true)
+    setStatusTone('')
+    setStatus('Saving profile…')
+    try{
+      const saved=await saveProfile(user.id,values,{avatarFile,previousAvatarPath:profile?.avatar_path||''})
+      updateProfile(current=>({...current,...saved}))
+      clearAvatarSelection()
+      setStatusTone('success')
+      setStatus('Profile saved. Checkout will use these details.')
+    }catch(error){
+      setStatusTone('error')
+      setStatus(error.message||'Could not save profile.')
+    }finally{setSavingProfile(false)}
+  }
 
   const [resetOpen,setResetOpen]=useState(false)
   const [resetStep,setResetStep]=useState('email')
@@ -779,17 +900,31 @@ export function SettingsPage(){
   }
 
   return <main className="customer-main narrow">
-    <section className="page-title"><span>Your account</span><h1>Settings</h1><p>Manage your personal information, account security, and delivery addresses in one place.</p></section>
+    <section className="page-title"><span>Your account</span><h1>Profile</h1><p>Manage your picture, personal information, account security, and delivery addresses in one place.</p></section>
     <section className="settings-stack">
-      <form className="account-card settings-section" onSubmit={submit}>
-        <header><div><span className="settings-kicker">Profile settings</span><h2>Personal information</h2></div></header>
+      <form className="account-card settings-section" onSubmit={submit} aria-busy={savingProfile}>
+        <header><div><span className="settings-kicker">Profile details</span><h2>Personal information</h2></div></header>
+        <div className="profile-picture-editor">
+          <div className="profile-picture-preview">{avatarUrl?<img src={avatarUrl} alt={`Profile preview for ${values.full_name||'customer'}`}/>:<span aria-hidden="true">{avatarInitials}</span>}</div>
+          <div className="profile-picture-copy">
+            <h3>Profile picture</h3>
+            <p id="profile-picture-help">Choose a JPG, PNG, or WEBP image up to 5 MB.</p>
+            <input ref={avatarInputRef} className="sr-only" id="profile-picture-input" type="file" accept={PROFILE_PICTURE_ACCEPT} aria-describedby={avatarError?'profile-picture-help profile-picture-error':'profile-picture-help'} onChange={chooseAvatar}/>
+            <div className="profile-picture-actions">
+              <button className="secondary-button" type="button" onClick={()=>avatarInputRef.current?.click()}><Camera size={17}/>{avatarFile?'Change selected photo':'Choose photo'}</button>
+              {avatarFile?<button className="profile-picture-cancel" type="button" onClick={clearAvatarSelection}>Cancel selection</button>:null}
+            </div>
+            {avatarFile?<small className="profile-picture-filename">Ready to save: {avatarFile.name}</small>:null}
+            {avatarError?<p className="profile-picture-error" id="profile-picture-error" role="alert">{avatarError}</p>:null}
+          </div>
+        </div>
         <div className="form-grid">
           <Field label="Full name" value={values.full_name} onChange={value=>set('full_name',value)}/>
           <Field label="Email address" type="email" value={values.email} onChange={value=>set('email',value)}/>
           <Field label="Contact number" value={values.phone} onChange={value=>set('phone',value)}/>
         </div>
-        <button className="primary-button" type="submit">Save profile</button>
-        {status&&<p className="settings-status" role="status">{status}</p>}
+        <button className="primary-button" type="submit" disabled={savingProfile}>{savingProfile?'Saving…':'Save profile'}</button>
+        {status&&<p className={`settings-status${statusTone?` is-${statusTone}`:''}`} role={statusTone==='error'?'alert':'status'}>{status}</p>}
         <div className="security-row">
           <div><h3>Password and security</h3><p>We'll send a secure password-reset code to your account email.</p></div>
           <button className="secondary-button" type="button" onClick={openPasswordReset}>Reset password</button>

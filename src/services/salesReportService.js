@@ -156,7 +156,7 @@ const STATUS_BUCKETS = [
 export function statusBucket(order) {
   if (order.refundedAmount > 0 || order.refundStatus === 'processed') return 'refunded'
   if (order.isCancelled) return 'cancelled'
-  if (order.status === 'Completed') return 'completed'
+  if (['Completed', 'Received'].includes(order.status)) return 'completed'
   if (order.status === 'Preparing') return 'preparing'
   if (order.status === 'Ready for Pickup' || order.status === 'Out for Delivery') return 'ready'
   return 'other'
