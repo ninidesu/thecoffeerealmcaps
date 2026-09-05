@@ -1,14 +1,20 @@
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { dispatchOrderEmails } from './orderEmailService'
 import { IMAGE_UPLOAD_ACCEPT, validateImageFile } from '../utils/imageUpload'
+import { isValidEmail, isValidPhone, sanitizePersonName, sanitizePhone } from '../utils/inputValidation'
 export async function fetchProducts(){if(!isSupabaseConfigured)return null;const {data,error}=await supabase.from('products').select('*, product_variations(*), product_addons(addons(*))').eq('is_active',true).order('display_order');if(error)throw error;return data}
 export async function fetchProfile(userId){const {data,error}=await supabase.from('profiles').select('*').eq('id',userId).single();if(error)throw error;return data}
 const PROFILE_PICTURE_BUCKET='profile-pictures'
 export const PROFILE_PICTURE_ACCEPT=IMAGE_UPLOAD_ACCEPT
 export const validateProfilePicture=(file)=>validateImageFile(file,{label:'Profile picture'})
 export async function saveProfile(userId,values,{avatarFile=null,previousAvatarPath=''}={}){
+  const cleanName=sanitizePersonName(values.full_name||'',60).trim()
+  const cleanPhone=sanitizePhone(values.phone||'')
+  if(cleanName.length<2||cleanName!==String(values.full_name||'').trim())throw new Error('Enter a valid name using letters only.')
+  if(values.email&&!isValidEmail(values.email))throw new Error('Enter a valid email address.')
+  if(cleanPhone&&!isValidPhone(cleanPhone))throw new Error('Contact number must contain 11 digits and start with 09.')
   let uploadedPath=''
-  let nextValues={...values}
+  let nextValues={...values,full_name:cleanName,phone:cleanPhone}
   if(avatarFile){
     const {extension}=await validateProfilePicture(avatarFile)
     const uniqueId=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -43,11 +49,13 @@ export async function saveProfile(userId,values,{avatarFile=null,previousAvatarP
   return data||{id:userId,email:nextValues.email||authData.user?.email,...metadata,...nextValues}
 }
 export async function fetchAddresses(userId){const {data,error}=await supabase.from('customer_addresses').select('*').eq('customer_id',userId).order('is_default',{ascending:false}).order('created_at',{ascending:false});if(error)throw error;return data}
-export async function createAddress(userId,values){const {data,error}=await supabase.from('customer_addresses').insert({customer_id:userId,label:values.label||null,recipient_name:values.recipientName||null,phone:values.phone||null,address_line:values.addressLine,barangay:values.barangay||null,city:values.city||'Quezon City',province:values.province||'Metro Manila',postal_code:values.postalCode||null,delivery_notes:values.deliveryNotes||null,is_default:Boolean(values.isDefault)}).select().single();if(error)throw error;return data}
-export async function updateAddress(addressId,values){const {data,error}=await supabase.from('customer_addresses').update({label:values.label||null,recipient_name:values.recipientName||null,phone:values.phone||null,address_line:values.addressLine,barangay:values.barangay||null,city:values.city||'Quezon City',province:values.province||'Metro Manila',postal_code:values.postalCode||null,delivery_notes:values.deliveryNotes||null,is_default:Boolean(values.isDefault),updated_at:new Date().toISOString()}).eq('id',addressId).select().single();if(error)throw error;return data}
+export async function createAddress(userId,values){const phone=sanitizePhone(values.phone||'');const recipientName=sanitizePersonName(values.recipientName||'',60).trim();if(phone&&!isValidPhone(phone))throw new Error('Contact number must contain 11 digits and start with 09.');if(recipientName!==String(values.recipientName||'').trim())throw new Error('Enter a valid recipient name using letters only.');const {data,error}=await supabase.from('customer_addresses').insert({customer_id:userId,label:values.label||null,recipient_name:recipientName||null,phone:phone||null,address_line:values.addressLine,barangay:values.barangay||null,city:values.city||'Quezon City',province:values.province||'Metro Manila',postal_code:values.postalCode||null,delivery_notes:values.deliveryNotes||null,is_default:Boolean(values.isDefault)}).select().single();if(error)throw error;return data}
+export async function updateAddress(addressId,values){const phone=sanitizePhone(values.phone||'');const recipientName=sanitizePersonName(values.recipientName||'',60).trim();if(phone&&!isValidPhone(phone))throw new Error('Contact number must contain 11 digits and start with 09.');if(recipientName!==String(values.recipientName||'').trim())throw new Error('Enter a valid recipient name using letters only.');const {data,error}=await supabase.from('customer_addresses').update({label:values.label||null,recipient_name:recipientName||null,phone:phone||null,address_line:values.addressLine,barangay:values.barangay||null,city:values.city||'Quezon City',province:values.province||'Metro Manila',postal_code:values.postalCode||null,delivery_notes:values.deliveryNotes||null,is_default:Boolean(values.isDefault),updated_at:new Date().toISOString()}).eq('id',addressId).select().single();if(error)throw error;return data}
 export async function deleteAddress(addressId){const {error}=await supabase.from('customer_addresses').delete().eq('id',addressId);if(error)throw error}
 export async function setDefaultAddress(addressId){const {data,error}=await supabase.from('customer_addresses').update({is_default:true,updated_at:new Date().toISOString()}).eq('id',addressId).select().single();if(error)throw error;return data}
 export async function createCustomerOrder(payload){if(!isSupabaseConfigured)throw new Error('Supabase is not configured.');const {data,error}=await supabase.rpc('create_customer_order',{request_payload:payload});if(error)throw error;return data}
+export async function createCustomerOrderWithBenefitDiscount(payload){if(!isSupabaseConfigured)throw new Error('Supabase is not configured.');const {data,error}=await supabase.rpc('create_customer_order_with_benefit_discount',{request_payload:payload});if(error)throw error;return data}
+export async function fetchCustomerBenefitApplication(customerId){if(!customerId)return null;const {data,error}=await supabase.from('benefit_applications').select('status,kind').eq('customer_id',customerId).maybeSingle();if(error)throw error;return data}
 
 export async function uploadPaymentProof({orderId,userId,file}){
   const {extension}=await validateImageFile(file,{label:'Payment proof'})

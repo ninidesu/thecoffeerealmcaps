@@ -27,7 +27,6 @@ export async function fetchDashboardData() {
     { data: ingredients, error: ingredientsError },
     { data: finishedProducts, error: finishedError },
     { data: menuItems, error: menuError },
-    { data: customerMessages },
     { data: auditEvents },
     { data: portalConfiguration },
   ] = await Promise.all([
@@ -38,7 +37,6 @@ export async function fetchDashboardData() {
     supabase.from('ingredients').select('id,name,unit,supplier,expiration_date,is_archived,inventory_stock(quantity,min_stock_level,high_stock_level)').eq('is_archived', false),
     supabase.from('finished_products').select('id,name,unit,quantity,min_stock_level,high_stock_level,supplier,expiration_date,is_archived').eq('is_archived', false),
     supabase.from('menu_items').select('id,name,is_available,manual_available,unavailable_reason,is_archived').eq('is_archived', false),
-    supabase.from('customer_messages').select('id,customer_name,subject,category,status,created_at').order('created_at', { ascending: false }).limit(100),
     supabase.from('portal_audit_events').select('id,occurred_at,actor_name_snapshot,module,summary,result,severity').order('occurred_at', { ascending: false }).limit(12),
     supabase.from('portal_configuration').select('key,value,updated_at').eq('scope', 'system'),
   ])
@@ -58,7 +56,6 @@ export async function fetchDashboardData() {
     ingredients: ingredients || [],
     finishedProducts: finishedProducts || [],
     menuItems: menuItems || [],
-    customerMessages: customerMessages || [],
     auditEvents: auditEvents || [],
     portalConfiguration: portalConfiguration || [],
   }
@@ -77,7 +74,7 @@ function salesOf(orders) {
 export function computeDashboardMetrics(raw) {
   const {
     orders, refunds, allCustomerOrders, totalCustomers, ingredients, finishedProducts, menuItems,
-    customerMessages = [], auditEvents = [], portalConfiguration = [],
+    auditEvents = [], portalConfiguration = [],
   } = raw
 
   const today = isoDay(dayStart(0))
@@ -189,8 +186,6 @@ export function computeDashboardMetrics(raw) {
 
   const pendingRefunds = refunds.filter((refund) => ['pending_review', 'pending', 'approved', 'processing', 'failed'].includes(refund.refund_status))
   const pendingRefundAmount = pendingRefunds.reduce((sum, refund) => sum + Number(refund.refund_amount || 0), 0)
-  const awaitingMessages = customerMessages.filter((message) => message.status !== 'replied')
-  const messagesToday = customerMessages.filter((message) => message.created_at && isoDay(new Date(message.created_at)) === today).length
   const criticalAuditEvents = auditEvents.filter((event) => event.severity === 'critical' || event.result === 'failed')
   const orderingConfig = portalConfiguration.find((entry) => entry.key === 'ordering')?.value || {}
 
@@ -214,7 +209,7 @@ export function computeDashboardMetrics(raw) {
     lowStockItems, outOfStockItems, expiringItems, unavailableMenuItems, stockBlockedMenuItems,
     salesTrend, ordersTrend, averageOrderTrend, fulfillmentCounts, paymentTotals, paymentUsage, bestSellers, recentOrders, newCustomers, returningCustomers,
     attentionOrders, orderStageCounts, pendingRefunds, pendingRefundAmount,
-    awaitingMessages, messagesToday, auditEvents, criticalAuditEvents,
+    auditEvents, criticalAuditEvents,
     storeStatus: orderingConfig.storeStatus || 'open',
   }
 }

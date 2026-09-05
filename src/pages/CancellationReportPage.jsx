@@ -484,7 +484,7 @@ export default function CancellationReportPage() {
         <div className="cancel-records-head">
           <div><h2>{activeTab === 'refunds' ? 'Refund Records' : 'Cancellation Records'}</h2><span>{searchedRecords.length} record{searchedRecords.length === 1 ? '' : 's'} in view</span></div>
           <div className="cancel-record-tools">
-            <label className="search cancel-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={activeTab === 'refunds' ? 'Search order, customer, reference...' : 'Search order, customer, reason...'} aria-label={`Search ${activeTab} records`} />{search && <button type="button" onClick={() => setSearch('')} aria-label="Clear search"><X size={14} /></button>}</label>
+            <label className="search cancel-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value.slice(0, 100))} maxLength={100} placeholder={activeTab === 'refunds' ? 'Search order, customer, reference...' : 'Search order, customer, reason...'} aria-label={`Search ${activeTab} records`} />{search && <button type="button" onClick={() => setSearch('')} aria-label="Clear search"><X size={14} /></button>}</label>
             <select value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label={`Sort ${activeTab} records`}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="highest">Highest amount</option><option value="lowest">Lowest amount</option></select>
           </div>
         </div>

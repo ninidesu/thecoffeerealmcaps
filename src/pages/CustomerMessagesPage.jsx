@@ -119,7 +119,7 @@ export default function CustomerMessagesPage() {
           <label className="cm-search">
             <Search size={18} aria-hidden="true" />
             <span className="sr-only">Search customer messages</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email, subject, or message" />
+            <input value={query} onChange={(event) => setQuery(event.target.value.slice(0, 100))} maxLength={100} placeholder="Search name, email, subject, or message" />
             {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear message search"><X size={16} /></button>}
           </label>
           <div className="cm-filter-tabs" role="tablist" aria-label="Message type filters">
@@ -223,7 +223,7 @@ function ReplyDialog({ message, onClose, onSent }) {
       <blockquote><p>{message.message}</p><footer>{formatDate(message.created_at)}</footer></blockquote>
       {message.reply_text && <div className="cm-previous-reply"><b>Previous reply</b><p>{message.reply_text}</p><small>Sent {formatDate(message.replied_at)}</small></div>}
       <form onSubmit={submit}>
-        <label><span>Your reply</span><textarea autoFocus required minLength={2} maxLength={5000} value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Write a clear, helpful response…" /></label>
+        <label><span>Your reply</span><textarea autoFocus required minLength={2} maxLength={2000} value={reply} onChange={(event) => setReply(event.target.value.slice(0, 2000))} placeholder="Write a clear, helpful response…" /></label>
         <small>The customer will receive a branded email at {message.customer_email}.</small>
         {error && <p className="cm-dialog-error" role="alert">{error}</p>}
         <footer><button type="button" className="cm-secondary-button" onClick={onClose} disabled={sending}>Cancel</button><button type="submit" className="cm-send-button" disabled={sending || !reply.trim()}>{sending ? 'Sending…' : <><Send size={17} />Send reply</>}</button></footer>

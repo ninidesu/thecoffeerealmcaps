@@ -419,7 +419,7 @@ export default function OrderPreparationPage() {
         <label className="ops-search">
           <Search size={17} />
           <span className="sr-only">Search orders</span>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search order number or customer name" />
+          <input value={search} onChange={(e) => setSearch(e.target.value.slice(0, 100))} maxLength={100} placeholder="Search order number or customer name" />
         </label>
         <label className="ops-toolbar-field"><span>Fulfillment</span><select value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)}><option value="all">All</option><option value="walk-in">Walk-in</option><option value="pickup">Pickup</option><option value="delivery">Delivery</option></select></label>
         <label className="ops-toolbar-field"><span>Payment method</span><select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="all">All methods</option><option value="cash">Cash</option><option value="gcash">GCash</option><option value="bank_transfer">Bank transfer</option><option value="cod">Cash on Delivery</option></select></label>
@@ -622,7 +622,7 @@ function RefundCompletionModal({ target, busy, onClose, onSubmit }) {
         <h2 id="refund-completion-title">Confirm completed refund</h2>
         <p>Only mark the {money(refund.refund_amount)} refund for {order.order_number} as done after the customer payout has actually been transferred.</p>
         <form onSubmit={submit}>
-          <label className="field"><span>Transfer or refund reference</span><input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value)} placeholder="e.g. GCash or bank reference number" autoFocus required /></label>
+          <label className="field"><span>Transfer or refund reference</span><input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value.slice(0, 30))} maxLength={30} placeholder="e.g. GCash or bank reference number" autoFocus required /></label>
           <p className="ops-proof-pending">Saving the reference resolves the cancellation and emails the customer that the refund is complete.</p>
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Go back</button>
@@ -693,7 +693,7 @@ function CancelModal({ order, busy, onClose, onConfirm }) {
           : 'No verified payment is recorded, so this order will be cancelled immediately.'}</p>
         <label className="field">
           <span>Cancellation reason</span>
-          <textarea rows="3" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Item unavailable, customer request…" autoFocus />
+          <textarea rows="3" value={reason} onChange={(e) => setReason(e.target.value.slice(0, 500))} maxLength={500} placeholder="e.g. Item unavailable, customer request…" autoFocus />
         </label>
         <p className="ops-proof-pending">A reason is required. The customer will receive an email after this action is recorded.</p>
         <div className="payment-modal-actions">
@@ -735,7 +735,7 @@ function CancellationReviewModal({ order, busy, onClose, onSubmit }) {
         )}
         <label className="field">
           <span>Review notes</span>
-          <textarea rows="3" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Record how the payment was checked and why this decision is appropriate." autoFocus />
+          <textarea rows="3" value={notes} onChange={(event) => setNotes(event.target.value.slice(0, 500))} maxLength={500} placeholder="Record how the payment was checked and why this decision is appropriate." autoFocus />
         </label>
         <p className="ops-proof-pending">{becomesPaid
           ? `Approval cancels the order and creates a ${money(order.final_total)} refund that stays pending until the transfer reference is recorded.`

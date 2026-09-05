@@ -34,6 +34,7 @@ function normalizeMenuItem(row, orderCount = 0) {
     unavailableReason: row.unavailable_reason,
     isFeatured: Boolean(row.is_featured),
     isBestseller: Boolean(row.is_bestseller),
+    onlineBenefitEligible: Boolean(row.online_benefit_eligible),
     prepTimeMinutes: row.prep_time_minutes,
     availableFrom: row.available_from,
     availableUntil: row.available_until,
@@ -152,6 +153,15 @@ export async function upsertMenuItem(payload) {
 export async function setMenuItemAvailability(id, manualAvailable) {
   const { error } = await supabase.rpc('staff_set_menu_item_availability', { p_id: id, p_manual_available: manualAvailable })
   if (error) throw error
+}
+
+export async function requestMenuDiscountEligibility(ids, eligible) {
+  const { data, error } = await supabase.rpc('staff_request_online_benefit_eligibility', {
+    p_ids: ids, p_eligible: eligible,
+  })
+  if (error) throw error
+  window.dispatchEvent(new CustomEvent('menu-approval-requests-changed'))
+  return data
 }
 
 export async function archiveMenuItem(id) {

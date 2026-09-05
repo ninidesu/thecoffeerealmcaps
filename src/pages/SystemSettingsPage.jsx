@@ -2,6 +2,7 @@ import { AlertTriangle, Check, Clock3, CreditCard, Database, Image, Info, MapPin
 import { useCallback, useEffect, useState } from 'react'
 import AppShell from '../components/AppShell'
 import { describeError } from '../utils/describeError'
+import { EMAIL_MAX_LENGTH, isValidEmail, isValidPhone, sanitizeCatalogText, sanitizeDigits, sanitizePersonName, sanitizePhone } from '../utils/inputValidation'
 import { IMAGE_UPLOAD_ACCEPT, validateImageFile } from '../utils/imageUpload'
 import {
   SYSTEM_DEFAULTS, fetchDeliveryZoneSettings, fetchPortalConfiguration,
@@ -37,7 +38,7 @@ export default function SystemSettingsPage() {
     setLoading(true)
     try {
       const [configuration, deliveryZones] = await Promise.all([fetchPortalConfiguration('system'), fetchDeliveryZoneSettings()])
-      setSettings(configuration.values); setZones(deliveryZones); setUpdatedAt(configuration.updatedAt); setSetupRequired(configuration.setupRequired); setError('')
+       setSettings((current) => ({ ...current, ...configuration.values, store: { ...current.store, ...configuration.values.store, phone: sanitizePhone(configuration.values.store?.phone || '') } })); setZones(deliveryZones); setUpdatedAt(configuration.updatedAt); setSetupRequired(configuration.setupRequired); setError('')
     } catch (cause) { setError(describeError(cause, 'System settings could not be loaded.')) }
     finally { setLoading(false) }
   }, [])
@@ -46,6 +47,8 @@ export default function SystemSettingsPage() {
 
   const update = (key, values) => setSettings((current) => ({ ...current, [key]: { ...current[key], ...values } }))
   const save = async (key) => {
+    if (key === 'store' && settings.store.email && !isValidEmail(settings.store.email)) { setError('Enter a valid business email address.'); return }
+    if (key === 'store' && settings.store.phone && !isValidPhone(settings.store.phone)) { setError('Contact number must contain 11 digits and start with 09.'); return }
     if (key === 'ordering' && !settings.ordering.deliveryEnabled && !settings.ordering.pickupEnabled) { setError('Keep at least one fulfillment method enabled.'); return }
     if (key === 'payments' && !(settings.payments.enabledMethods || []).length) { setError('Keep at least one payment method enabled.'); return }
     setSaving(true); setError('')
@@ -80,11 +83,11 @@ export default function SystemSettingsPage() {
           {loading ? <div className="ac-skeleton"><i/><i/><i/><i/></div> : <>
             {section === 'store' && <SettingsSection title="Store profile" description="These details appear on customer-facing contact and footer surfaces." onSave={() => save('store')} saving={saving}>
               <div className="ac-form-grid">
-                <Field label="Store name"><input value={settings.store.name} onChange={(event) => update('store', { name: event.target.value })}/></Field>
-                <Field label="Business email"><input type="email" value={settings.store.email} onChange={(event) => update('store', { email: event.target.value })}/></Field>
-                <Field label="Contact number"><input value={settings.store.phone} onChange={(event) => update('store', { phone: event.target.value })}/></Field>
+                <Field label="Store name"><input value={settings.store.name} maxLength={80} onChange={(event) => update('store', { name: sanitizeCatalogText(event.target.value, 80) })}/></Field>
+                <Field label="Business email"><input type="email" maxLength={EMAIL_MAX_LENGTH} value={settings.store.email} onChange={(event) => update('store', { email: event.target.value.slice(0, EMAIL_MAX_LENGTH) })}/></Field>
+                <Field label="Contact number"><input type="tel" inputMode="numeric" autoComplete="tel" maxLength={11} pattern="09[0-9]{9}" title="Enter 11 digits starting with 09." placeholder="09XXXXXXXXX" value={settings.store.phone} onChange={(event) => update('store', { phone: sanitizePhone(event.target.value) })}/></Field>
                 <Field label="Timezone" hint="Schedules and timestamps use this timezone."><select value={settings.store.timezone} onChange={(event) => update('store', { timezone: event.target.value })}><option value="Asia/Manila">Asia/Manila (PHT)</option></select></Field>
-                <Field label="Store address" wide><textarea rows="3" value={settings.store.address} onChange={(event) => update('store', { address: event.target.value })}/></Field>
+                <Field label="Store address" wide><textarea rows="3" maxLength={200} value={settings.store.address} onChange={(event) => update('store', { address: event.target.value })}/></Field>
               </div>
             </SettingsSection>}
 
@@ -94,7 +97,7 @@ export default function SystemSettingsPage() {
                 <Field label="Opening time"><input type="time" value={settings.ordering.openTime} onChange={(event) => update('ordering', { openTime: event.target.value })}/></Field>
                 <Field label="Last order time"><input type="time" value={settings.ordering.closeTime} onChange={(event) => update('ordering', { closeTime: event.target.value })}/></Field>
                 <Field label="Minimum order (PHP)" hint="Set to 0 for no minimum."><input type="number" min="0" step="1" value={settings.ordering.minimumOrder} onChange={(event) => update('ordering', { minimumOrder: Number(event.target.value) })}/></Field>
-                <Field label="Closed-store message" wide><textarea rows="3" value={settings.ordering.closureMessage} onChange={(event) => update('ordering', { closureMessage: event.target.value })}/></Field>
+                <Field label="Closed-store message" wide><textarea rows="3" maxLength={240} value={settings.ordering.closureMessage} onChange={(event) => update('ordering', { closureMessage: event.target.value })}/></Field>
               </div>
               <div className="ac-toggle-stack"><Toggle checked={settings.ordering.deliveryEnabled} onChange={(value) => update('ordering', { deliveryEnabled: value })} label="Delivery" hint="Show delivery as a checkout option."/><Toggle checked={settings.ordering.pickupEnabled} onChange={(value) => update('ordering', { pickupEnabled: value })} label="Store pickup" hint="Show pickup as a checkout option."/></div>
             </SettingsSection>}
@@ -102,7 +105,7 @@ export default function SystemSettingsPage() {
             {section === 'delivery' && <SettingsSection title="Delivery zones" description="A zone update applies to every Barangay assigned to it." onSave={() => save('delivery')} saving={saving}>
               <div className="ac-zone-list">{zones.map((zone, index) => <article key={zone.zone}>
                 <header><div><MapPin size={17}/><span><b>{zone.zone}</b><small>{zone.barangays.length} Barangay{zone.barangays.length === 1 ? '' : 's'}</small></span></div><Toggle checked={zone.active} onChange={(value) => updateZone(index, { active: value })} label={zone.active ? 'Active' : 'Inactive'}/></header>
-                <div className="ac-form-grid"><Field label="Delivery fee (PHP)"><input type="number" min="0" step="1" value={zone.fee} onChange={(event) => updateZone(index, { fee: Number(event.target.value) })}/></Field><Field label="Estimated time"><input value={zone.estimatedTime} onChange={(event) => updateZone(index, { estimatedTime: event.target.value })} placeholder="e.g. 20–35 minutes"/></Field></div>
+                 <div className="ac-form-grid"><Field label="Delivery fee (PHP)"><input type="number" min="0" step="1" value={zone.fee} onChange={(event) => updateZone(index, { fee: Number(event.target.value) })}/></Field><Field label="Estimated time"><input maxLength={40} value={zone.estimatedTime} onChange={(event) => updateZone(index, { estimatedTime: event.target.value.slice(0, 40) })} placeholder="e.g. 20–35 minutes"/></Field></div>
                 <details><summary>View included Barangays</summary><p>{zone.barangays.join(', ')}</p></details>
               </article>)}</div>
             </SettingsSection>}
@@ -112,8 +115,8 @@ export default function SystemSettingsPage() {
                 {[['cod','Cash on delivery','Delivery orders only'],['gcash','GCash','Requires proof of payment'],['bank_transfer','Bank transfer','Requires proof of payment']].map(([id,label,hint]) => <Toggle key={id} checked={(settings.payments.enabledMethods || []).includes(id)} onChange={() => toggleMethod(id)} label={label} hint={hint}/>) }
               </div>
               <div className="ac-subsection"><h3>Cash on delivery</h3><div className="ac-form-grid"><Field label="Maximum order total (PHP)" hint="Orders above this amount must use a digital method."><input type="number" min="0" step="1" value={settings.payments.codMaximum} onChange={(event) => update('payments', { codMaximum: Number(event.target.value) })}/></Field></div></div>
-              <div className="ac-subsection"><h3>GCash</h3><QrAssetEditor label="GCash payment QR" currentUrl={settings.payments.gcashQrUrl} file={qrFiles.gcash} onChange={(file) => setQrFiles((current) => ({ ...current, gcash: file }))} onError={setError}/><div className="ac-form-grid"><Field label="Customer instructions" wide><textarea rows="3" value={settings.payments.gcashInstructions} onChange={(event) => update('payments', { gcashInstructions: event.target.value })}/></Field></div></div>
-              <div className="ac-subsection"><h3>Bank transfer</h3><QrAssetEditor label="Bank transfer QR" currentUrl={settings.payments.bankQrUrl} file={qrFiles.bank_transfer} onChange={(file) => setQrFiles((current) => ({ ...current, bank_transfer: file }))} onError={setError}/><div className="ac-form-grid"><Field label="Bank name"><input value={settings.payments.bankName} onChange={(event) => update('payments', { bankName: event.target.value })}/></Field><Field label="Account name"><input value={settings.payments.bankAccountName} onChange={(event) => update('payments', { bankAccountName: event.target.value })}/></Field><Field label="Account number"><input value={settings.payments.bankAccountNumber} onChange={(event) => update('payments', { bankAccountNumber: event.target.value })}/></Field><Field label="Customer instructions" wide><textarea rows="3" value={settings.payments.bankInstructions} onChange={(event) => update('payments', { bankInstructions: event.target.value })}/></Field></div></div>
+               <div className="ac-subsection"><h3>GCash</h3><QrAssetEditor label="GCash payment QR" currentUrl={settings.payments.gcashQrUrl} file={qrFiles.gcash} onChange={(file) => setQrFiles((current) => ({ ...current, gcash: file }))} onError={setError}/><div className="ac-form-grid"><Field label="Customer instructions" wide><textarea rows="3" maxLength={500} value={settings.payments.gcashInstructions} onChange={(event) => update('payments', { gcashInstructions: event.target.value })}/></Field></div></div>
+               <div className="ac-subsection"><h3>Bank transfer</h3><QrAssetEditor label="Bank transfer QR" currentUrl={settings.payments.bankQrUrl} file={qrFiles.bank_transfer} onChange={(file) => setQrFiles((current) => ({ ...current, bank_transfer: file }))} onError={setError}/><div className="ac-form-grid"><Field label="Bank name"><input maxLength={80} value={settings.payments.bankName} onChange={(event) => update('payments', { bankName: sanitizeCatalogText(event.target.value, 80) })}/></Field><Field label="Account name"><input maxLength={80} value={settings.payments.bankAccountName} onChange={(event) => update('payments', { bankAccountName: sanitizePersonName(event.target.value, 80) })}/></Field><Field label="Account number"><input inputMode="numeric" maxLength={34} value={settings.payments.bankAccountNumber} onChange={(event) => update('payments', { bankAccountNumber: sanitizeDigits(event.target.value, 34) })}/></Field><Field label="Customer instructions" wide><textarea rows="3" maxLength={500} value={settings.payments.bankInstructions} onChange={(event) => update('payments', { bankInstructions: event.target.value })}/></Field></div></div>
             </SettingsSection>}
 
             {section === 'pricing' && <SettingsSection title="Pricing & VAT" description="One global policy applies to customers, cashiers, staff, reports, receipts, and new orders." onSave={() => save('pricing')} saving={saving}>

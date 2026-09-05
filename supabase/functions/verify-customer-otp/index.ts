@@ -37,7 +37,7 @@ serve(async (req) => {
 
     if (!email || !email.includes("@")) throw new Error("A valid email address is required.");
     if (username.length < 3) throw new Error("Username must be at least 3 characters long.");
-    if (password.length < 6 || !/\d/.test(password)) throw new Error("Password must be at least 6 characters and include at least 1 number.");
+    if (!/^(?=.*\d).{8,32}$/.test(password)) throw new Error("Password must be 8–32 characters and include at least 1 number.");
     if (!/^\d{6}$/.test(otp)) throw new Error("OTP must be exactly 6 digits.");
 
     const { data: row, error: rowError } = await admin

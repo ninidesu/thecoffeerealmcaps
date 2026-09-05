@@ -13,6 +13,7 @@ import {
 import { getCurrentPortalSession } from '../lib/auth'
 import { fetchStaffPreferences, getRememberedStaffFilters, rememberStaffFilters, shouldShowSystemNotification } from '../services/staffSettingsService'
 import { useManagementSessionState } from '../hooks/useManagementSessionState'
+import { sanitizeCatalogText } from '../utils/inputValidation'
 
 const ENTITY_CONFIGS = {
   ingredient: { key: 'ingredient', label: 'Ingredients', singular: 'Ingredient', fetch: fetchIngredients, upsert: upsertIngredient, archive: archiveIngredient, hasType: true },
@@ -415,8 +416,8 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
         <header className="inv-form-header"><span className="inv-form-icon"><Package size={20} /></span><div><span>{item ? `Editing ${config.singular.toLowerCase()}` : `New ${config.singular.toLowerCase()}`}</span><h2 id="inv-form-title">{item ? item.name : `Add ${config.singular.toLowerCase()} stock`}</h2><p id="inv-form-description">{config.key === 'finished_product' ? 'Set the stock unit, then define how each menu format uses this product.' : 'Add the item details, stock levels, and replenishment thresholds.'}</p></div></header>
         <form className="inv-record-form" onSubmit={submit}>
           <section className="inv-form-section"><header><h3>Item details</h3><p>How this item will appear in inventory.</p></header><div className="form-grid">
-            <label className="field"><span>{config.singular} name</span><input value={values.name} onChange={(e) => set('name', e.target.value)} required /></label>
-            <label className="field"><span>Category</span><input value={values.category} onChange={(e) => set('category', e.target.value)} placeholder="e.g. Milk, Protein, Syrup" /></label>
+            <label className="field"><span>{config.singular} name</span><input value={values.name} onChange={(e) => set('name', sanitizeCatalogText(e.target.value, 80))} maxLength={80} required /></label>
+            <label className="field"><span>Category</span><input value={values.category} onChange={(e) => set('category', sanitizeCatalogText(e.target.value, 60))} maxLength={60} placeholder="e.g. Milk, Protein, Syrup" /></label>
             {config.hasType && (
               <label className="field"><span>Type</span>
                 <select value={values.type} onChange={(e) => set('type', e.target.value)}>
@@ -426,7 +427,7 @@ function ItemFormModal({ config, item, menuItems, onClose, onSave }) {
             )}
           </div></section>
           <section className="inv-form-section"><header><h3>Stock levels</h3><p>Use the same unit for the quantity and thresholds.</p></header><div className="form-grid">
-            <label className="field"><span>Unit</span><input value={values.unit} onChange={(e) => set('unit', e.target.value)} placeholder={config.key === 'finished_product' ? 'piece, slice, box' : 'kg, L, pcs'} required /></label>
+            <label className="field"><span>Unit</span><input value={values.unit} onChange={(e) => set('unit', sanitizeCatalogText(e.target.value, 24))} maxLength={24} placeholder={config.key === 'finished_product' ? 'piece, slice, box' : 'kg, L, pcs'} required /></label>
             {!item && <label className="field"><span>Starting quantity</span><input type="number" min="0" step="any" value={values.initialQuantity} onChange={(e) => set('initialQuantity', e.target.value)} /></label>}
             <label className="field"><span>Low-stock threshold</span><input type="number" min="0" step="any" value={values.minStockLevel} onChange={(e) => set('minStockLevel', e.target.value)} required /></label>
             <label className="field"><span>Healthy-stock target</span><input type="number" min="0" step="any" value={values.highStockLevel} onChange={(e) => set('highStockLevel', e.target.value)} required /></label>
@@ -532,8 +533,8 @@ function AdjustStockModal({ target, busy, onClose, onConfirm }) {
               </select>
             </label>
           </div>
-          <label className="field"><span>Reason</span><textarea rows="2" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Weekly delivery, spoilage, recount…" required /></label>
-          <label className="field"><span>Reference / supplier / order (optional)</span><input value={reference} onChange={(e) => setReference(e.target.value)} /></label>
+          <label className="field"><span>Reason</span><textarea rows="2" value={reason} onChange={(e) => setReason(e.target.value.slice(0, 500))} maxLength={500} placeholder="e.g. Weekly delivery, spoilage, recount…" required /></label>
+          <label className="field"><span>Reference / supplier / order (optional)</span><input value={reference} onChange={(e) => setReference(e.target.value.slice(0, 80))} maxLength={80} /></label>
           {validAmount && (
             <div className="inv-adjust-preview compact">
               <div><span>Current</span><b>{formatQty(item.quantity)} {item.unit}</b></div>

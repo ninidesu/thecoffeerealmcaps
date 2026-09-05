@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { normalizeRole, roleRoutes, signInPortal } from '../lib/auth'
 import { queueAuthWelcome } from '../lib/authFeedback'
 import { fetchStaffPreferences } from '../services/staffSettingsService'
+import { EMAIL_MAX_LENGTH } from '../utils/inputValidation'
 
 export default function PortalLoginPage() {
   const [role, setRole] = useState('admin')
@@ -45,8 +46,8 @@ export default function PortalLoginPage() {
     <header className="legacy-portal-header"><div className="legacy-portal-brand"><Coffee size={22} fill="currentColor"/><span>thecoffeerealm</span></div><Lock size={21}/></header>
     <main className="legacy-login-card"><h1>Internal Portal Login</h1><p>Private access for admin, staff, and cashier only.</p><form onSubmit={submit} autoComplete="off">
       <label htmlFor="portal-role">Role</label><div className="legacy-input"><UsersRound size={19}/><select id="portal-role" value={role} onChange={event => setRole(event.target.value)} required><option value="admin">Admin</option><option value="staff">Operations Staff</option><option value="cashier">Cashier</option></select><ChevronDown size={18}/></div>
-      <label htmlFor="portal-identifier">{role === 'staff' ? 'Email or username' : 'Email'}</label><div className="legacy-input"><UserRound size={19}/><input id="portal-identifier" name="identifier" type={role === 'staff' ? 'text' : 'email'} placeholder={role === 'staff' ? 'name@example.com or username' : 'name@example.com'} required autoComplete="username" autoCapitalize="none" spellCheck="false"/></div>
-      <label htmlFor="portal-password">Password</label><div className="legacy-input"><Lock size={19}/><input id="portal-password" name="password" type={showPassword ? 'text' : 'password'} placeholder="********" required autoComplete="current-password"/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={19}/> : <Eye size={19}/>}</button></div>
+       <label htmlFor="portal-identifier">{role === 'staff' ? 'Email or username' : 'Email'}</label><div className="legacy-input"><UserRound size={19}/><input id="portal-identifier" name="identifier" type={role === 'staff' ? 'text' : 'email'} maxLength={role === 'staff' ? EMAIL_MAX_LENGTH : EMAIL_MAX_LENGTH} pattern={role === 'staff' ? '[A-Za-z0-9._@+-]+' : undefined} placeholder={role === 'staff' ? 'name@example.com or username' : 'name@example.com'} required autoComplete="username" autoCapitalize="none" spellCheck="false"/></div>
+       <label htmlFor="portal-password">Password</label><div className="legacy-input"><Lock size={19}/><input id="portal-password" name="password" type={showPassword ? 'text' : 'password'} minLength="8" maxLength="32" placeholder="********" required autoComplete="current-password"/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={19}/> : <Eye size={19}/>}</button></div>
       {message ? <p className="portal-message portal-message-error">{message}</p> : null}
       <button className="legacy-sign-in" type="submit" disabled={loading}><span>{loading ? 'Signing in...' : 'Sign In'}</span><ArrowRight size={19}/></button>
     </form></main>

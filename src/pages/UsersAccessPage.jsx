@@ -1,13 +1,16 @@
 import {
   Activity, AlertTriangle, BadgeCheck, CalendarDays, ChevronLeft, ChevronRight,
-  CircleUserRound, Download, FilterX, History, KeyRound, MailPlus, Search,
-  ShieldCheck, Trash2, UserPlus, Users, X,
+  CircleUserRound, Download, FilterX, History,
+  KeyRound, MailPlus, Search, ShieldCheck, Trash2,
+  UserPlus, Users, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import AppShell from '../components/AppShell'
+import BenefitsReviewModule from './BenefitsReviewModule'
 import { useAuth } from '../context/AuthContext'
 import { describeError } from '../utils/describeError'
+import { EMAIL_MAX_LENGTH, isValidEmail, sanitizePersonName, sanitizeUsername } from '../utils/inputValidation'
 import {
   PORTAL_ROLES, downloadAuditCsv, fetchManagedUsers, fetchPortalAuditEvents,
   fetchPortalAuditExport, invitePortalUser, removePortalUser, sendPortalPasswordReset, updatePortalUser,
@@ -45,6 +48,7 @@ function useEscapeClose(open, onClose) {
 function WorkspaceTabs() {
   return <nav className="ua-tabs" aria-label="Users and access modules">
     <NavLink to="/admin/users-access/users"><Users size={18} aria-hidden="true"/><span><b>User Management</b><small>Accounts, roles and access</small></span></NavLink>
+    <NavLink to="/admin/users-access/benefits"><BadgeCheck size={18} aria-hidden="true"/><span><b>PWD / Senior Citizen Approval</b><small>Senior Citizen and PWD verification</small></span></NavLink>
     <NavLink to="/admin/users-access/activity"><History size={18} aria-hidden="true"/><span><b>Activity Logs</b><small>Portal-wide audit trail</small></span></NavLink>
   </nav>
 }
@@ -58,10 +62,10 @@ export default function UsersAccessPage() {
   return <AppShell
     role="admin"
     title="Users & Access"
+    titleActions={<WorkspaceTabs />}
     onRefresh={() => setRefreshSignal((value) => value + 1)}
   >
-    <WorkspaceTabs />
-    {activityTab
+    {pathname.endsWith('/benefits') ? <BenefitsReviewModule refreshSignal={refreshSignal}/> : activityTab
       ? <ActivityLogsModule refreshSignal={refreshSignal} />
       : <UserManagementModule refreshSignal={refreshSignal} inviteOpen={inviteOpen} setInviteOpen={setInviteOpen} />}
   </AppShell>
@@ -132,7 +136,7 @@ function UserManagementModule({ refreshSignal, inviteOpen, setInviteOpen }) {
     </div>
 
     <div className="ua-toolbar">
-      <label className="ua-search"><Search size={18}/><span className="sr-only">Search users</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email or username"/></label>
+      <label className="ua-search"><Search size={18}/><span className="sr-only">Search users</span><input value={query} onChange={(event) => setQuery(event.target.value.slice(0, 100))} maxLength={100} placeholder="Search name, email or username"/></label>
       <label><span>Role</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="all">All roles</option>{PORTAL_ROLES.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
       <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="name">Name</option><option value="recent">Recently active</option><option value="created">Recently created</option></select></label>
       {(query || role !== 'all' || sort !== 'name') && <button type="button" className="ua-clear" onClick={clearFilters}><FilterX size={16}/>Clear</button>}
@@ -173,7 +177,9 @@ function InviteUserModal({ open, onClose, onSuccess }) {
   useEffect(() => { if (open) { setValues({ fullName: '', email: '', username: '', role: 'operational_staff' }); setError('') } }, [open])
   if (!open) return null
   const submit = async (event) => {
-    event.preventDefault(); setBusy(true); setError('')
+    event.preventDefault(); setError('')
+    if (!isValidEmail(values.email)) { setError('Enter a valid email address.'); return }
+    setBusy(true)
     try { await invitePortalUser(values); onClose(); onSuccess(`${values.fullName} was added. Sign-in instructions were sent to ${values.email}.`) }
     catch (cause) { setError(describeError(cause, 'Could not invite this user.')) }
     finally { setBusy(false) }
@@ -181,9 +187,9 @@ function InviteUserModal({ open, onClose, onSuccess }) {
   return <div className="ua-overlay" onMouseDown={onClose}><form className="ua-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="invite-user-title">
     <header><div><span className="ua-modal-icon"><MailPlus size={20}/></span><div><h2 id="invite-user-title">Add portal user</h2><p>Send a secure invitation to an internal team member.</p></div></div><button type="button" onClick={onClose} aria-label="Close add user dialog"><X/></button></header>
     <div className="ua-form-grid">
-      <label className="ua-field ua-field--wide"><span>Full name</span><input autoFocus required value={values.fullName} onChange={(event) => setValues({ ...values, fullName: event.target.value })} autoComplete="name"/></label>
-      <label className="ua-field"><span>Email</span><input required type="email" value={values.email} onChange={(event) => setValues({ ...values, email: event.target.value })} autoComplete="email"/></label>
-      <label className="ua-field"><span>Username <small>Optional</small></span><input value={values.username} onChange={(event) => setValues({ ...values, username: event.target.value })} autoComplete="username"/></label>
+      <label className="ua-field ua-field--wide"><span>Full name</span><input autoFocus required maxLength={60} value={values.fullName} onChange={(event) => setValues({ ...values, fullName: sanitizePersonName(event.target.value, 60) })} autoComplete="name"/></label>
+       <label className="ua-field"><span>Email</span><input required type="email" maxLength={EMAIL_MAX_LENGTH} value={values.email} onChange={(event) => setValues({ ...values, email: event.target.value.slice(0, EMAIL_MAX_LENGTH) })} autoComplete="email"/></label>
+      <label className="ua-field"><span>Username <small>Optional</small></span><input value={values.username} onChange={(event) => setValues({ ...values, username: sanitizeUsername(event.target.value, 24) })} autoComplete="username" minLength={3} maxLength={24} pattern="[A-Za-z0-9._-]+"/></label>
       <label className="ua-field ua-field--wide"><span>Portal role</span><select value={values.role} onChange={(event) => setValues({ ...values, role: event.target.value })}>{PORTAL_ROLES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><small>The new user receives only the permissions assigned to this role.</small></label>
     </div>
     {error && <p className="ua-form-error" role="alert">{error}</p>}
@@ -308,7 +314,7 @@ function ActivityLogsModule({ refreshSignal }) {
     </header>
     <div className="ua-audit-notice"><ShieldCheck size={18}/><div><b>Immutable audit trail</b><span>Events can be reviewed and exported, but they cannot be edited or deleted from the portal.</span></div></div>
     <div className="ua-toolbar ua-toolbar--audit">
-      <label className="ua-search"><Search size={18}/><span className="sr-only">Search activity logs</span><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search actor, action or target"/></label>
+      <label className="ua-search"><Search size={18}/><span className="sr-only">Search activity logs</span><input value={searchInput} onChange={(event) => setSearchInput(event.target.value.slice(0, 100))} maxLength={100} placeholder="Search actor, action or target"/></label>
       <label><span>Surface</span><select value={filters.surface} onChange={(event) => setFilter('surface', event.target.value)}><option value="all">All surfaces</option><option value="admin">Admin</option><option value="staff">Staff</option><option value="cashier">Cashier</option><option value="system">System</option></select></label>
       <label><span>Module</span><select value={filters.module} onChange={(event) => setFilter('module', event.target.value)}><option value="all">All modules</option>{MODULE_OPTIONS.map((item) => <option value={item} key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label>
       <label><span>Result</span><select value={filters.result} onChange={(event) => setFilter('result', event.target.value)}><option value="all">All results</option><option value="success">Success</option><option value="warning">Warning</option><option value="failed">Failed</option></select></label>

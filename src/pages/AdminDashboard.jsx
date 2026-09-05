@@ -1,6 +1,6 @@
 import {
   Activity, AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3,
-  Coffee, Mail, PackageCheck, PackageX, ReceiptText, RefreshCw,
+  Coffee, PackageCheck, PackageX, ReceiptText, RefreshCw,
   ShoppingBag, Store, TrendingDown, TrendingUp, Users, WalletCards,
 } from 'lucide-react'
 import { animate, motion, MotionConfig, useMotionValue, useReducedMotion, useTransform } from 'framer-motion'
@@ -248,6 +248,7 @@ export default function AdminDashboard() {
   if (pathname === '/admin/team') return <Navigate to="/admin/users-access/users" replace />
   if (pathname === '/admin/logs') return <Navigate to="/admin/users-access/activity" replace />
   if (pathname === '/admin/users-access') return <Navigate to="/admin/users-access/users" replace />
+  if (pathname === '/admin/users-access/approvals') return <Navigate to="/admin/users-access/users" replace />
   if (pathname.startsWith('/admin/users-access/')) return <UsersAccessPage />
   if (pathname === '/admin/content') return <ContentManagementPage />
   if (pathname === '/admin/settings') return <SystemSettingsPage />
@@ -287,14 +288,14 @@ function AdminDashboardHome() {
     if (!isSupabaseConfigured) return undefined
     const refresh = () => load({ quiet: true })
     const channel = supabase.channel('admin-dashboard-live')
-    ;['orders', 'payments', 'refunds', 'inventory_stock', 'menu_items', 'customer_messages'].forEach((table) => {
+    ;['orders', 'payments', 'refunds', 'inventory_stock', 'menu_items'].forEach((table) => {
       channel.on('postgres_changes', { event: '*', schema: 'public', table }, refresh)
     })
     channel.subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [load])
 
-  const attentionCount = metrics ? metrics.attentionOrders.length + metrics.pendingRefunds.length + metrics.outOfStockItems.length + metrics.awaitingMessages.length + metrics.criticalAuditEvents.length : 0
+  const attentionCount = metrics ? metrics.attentionOrders.length + metrics.pendingRefunds.length + metrics.outOfStockItems.length + metrics.criticalAuditEvents.length : 0
 
   return <AppShell
     role="admin"
@@ -313,7 +314,6 @@ function DashboardContent({ metrics }) {
   const actionCards = [
     { label: 'Low Stock Items', value: metrics.lowStockItems.length, detail: `${metrics.lowStockItems.length} items running low`, icon: PackageX, tone: 'rose', to: '/admin/inventory' },
     { label: 'Pending Issues', value: metrics.attentionOrders.length + metrics.pendingRefunds.length, detail: `${metrics.attentionOrders.length + metrics.pendingRefunds.length} items need review`, icon: Clock3, tone: 'amber', to: '/admin/cancellations' },
-    { label: 'Open Items', value: metrics.awaitingMessages.length, detail: `${metrics.awaitingMessages.length} items in queue`, icon: Mail, tone: 'blue', to: '/staff/messages' },
   ]
 
   const quickLinks = [

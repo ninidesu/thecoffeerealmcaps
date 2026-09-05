@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import { useAuth } from '../context/AuthContext'
 import { describeError } from '../utils/describeError'
+import { isValidInternalPassword, sanitizePersonName, sanitizeUsername } from '../utils/inputValidation'
 import {
   changeStaffPassword, DEFAULT_STAFF_PREFERENCES, fetchStaffPreferences,
   fetchPreciseStaffLocation, fetchStaffSessionInfo,
@@ -107,7 +108,7 @@ export default function StaffSettingsPage({ role = 'staff' }) {
     event.preventDefault()
     if (!profileValues.full_name.trim()) { showNotice('error', 'Enter your full name before saving.'); return }
     const username = profileValues.username.trim()
-    if (username && !/^[A-Za-z0-9._-]{3,32}$/.test(username)) { showNotice('error', 'Use 3–32 letters, numbers, periods, underscores, or hyphens for your username.'); return }
+    if (username && !/^[A-Za-z0-9._-]{3,24}$/.test(username)) { showNotice('error', 'Use 3–24 letters, numbers, periods, underscores, or hyphens for your username.'); return }
     setSaving('profile')
     try {
       const saved = await saveStaffProfile(user.id, profileValues)
@@ -143,7 +144,7 @@ export default function StaffSettingsPage({ role = 'staff' }) {
   async function submitPassword(event) {
     event.preventDefault()
     if (!passwords.current) { showNotice('error', 'Enter your current password before choosing a new one.'); return }
-    if (passwords.password.length < 8) { showNotice('error', 'Use a password with at least 8 characters.'); return }
+    if (!isValidInternalPassword(passwords.password)) { showNotice('error', 'Use 8–32 characters.'); return }
     if (passwords.password !== passwords.confirm) { showNotice('error', 'The new password and confirmation do not match.'); return }
     setSaving('password')
     try {
@@ -193,9 +194,9 @@ export default function StaffSettingsPage({ role = 'staff' }) {
       {activeSection === 'profile' && <form className="staff-settings-card" onSubmit={submitProfile}>
         <header className="staff-profile-header"><span className="staff-settings-icon"><UserRound size={19} /></span><div><h2>My profile</h2><p>Keep the details shown to your team accurate.</p></div><div className="staff-role-summary staff-profile-role"><span>Account role</span><b><ShieldCheck size={16} />{roleLabel(profile?.role)}</b></div></header>
         <div className="staff-settings-grid">
-          <label className="staff-settings-field" htmlFor="staff-full-name"><span>Full name</span><input id="staff-full-name" value={profileValues.full_name} onChange={(event) => updateProfileDraft('full_name', event.target.value)} autoComplete="name" required /></label>
-          <label className="staff-settings-field" htmlFor="staff-username"><span>Username <em>Optional</em></span><input id="staff-username" value={profileValues.username} onChange={(event) => updateProfileDraft('username', event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck="false" minLength="3" maxLength="32" pattern="[A-Za-z0-9._-]+" /><small>{role === 'admin' ? 'Used to identify you across the administration workspace.' : 'You can use this username or your email when signing in as staff.'}</small></label>
-          <label className="staff-settings-field"><span>Email address</span><input value={profile?.email || user?.email || ''} readOnly aria-readonly="true" /><small>{role === 'admin' ? 'Email changes are managed through Users & Access.' : 'Email changes require an administrator.'}</small></label>
+          <label className="staff-settings-field" htmlFor="staff-full-name"><span>Full name</span><input id="staff-full-name" value={profileValues.full_name} onChange={(event) => updateProfileDraft('full_name', sanitizePersonName(event.target.value, 60))} autoComplete="name" maxLength="60" required /></label>
+          <label className="staff-settings-field" htmlFor="staff-username"><span>Username <em>Optional</em></span><input id="staff-username" value={profileValues.username} onChange={(event) => updateProfileDraft('username', sanitizeUsername(event.target.value, 24))} autoComplete="username" autoCapitalize="none" spellCheck="false" minLength="3" maxLength="24" pattern="[A-Za-z0-9._-]+" /><small>{role === 'admin' ? 'Used to identify you across the administration workspace.' : 'You can use this username or your email when signing in as staff.'}</small></label>
+          <label className="staff-settings-field"><span>Email address</span><input value={profile?.email || user?.email || ''} readOnly aria-readonly="true" maxLength="160" /><small>{role === 'admin' ? 'Email changes are managed through Users & Access.' : 'Email changes require an administrator.'}</small></label>
           <div className="staff-profile-save"><button className="ops-main-action" type="submit" disabled={saving === 'profile'}><Save size={16} />{saving === 'profile' ? 'Saving…' : 'Save profile'}</button></div>
         </div>
       </form>}
@@ -237,9 +238,9 @@ export default function StaffSettingsPage({ role = 'staff' }) {
       {activeSection === 'security' && <form className="staff-settings-card staff-settings-security" onSubmit={submitPassword}>
         <header className="staff-security-header"><span className="staff-settings-icon"><LockKeyhole size={19} /></span><div><h2>Security</h2><p>Use a strong, unique password for this internal account.</p></div><section className="staff-session-details" aria-labelledby="active-session-title"><div className="staff-session-current"><span className="staff-session-eyebrow">Active session</span><h3 className="staff-session-device-title" id="active-session-title">This device</h3><div className="staff-session-network" aria-label="Current IP address and approximate city and state or province" aria-live="polite">{sessionInfo.loading ? <span className="staff-session-loading">Checking…</span> : <><code title={sessionInfo.ip || 'Unavailable'}>{sessionInfo.ip || 'Unavailable'}</code><span className="staff-session-place" title={sessionInfo.city ? `${sessionInfo.city}${sessionInfo.region ? `, ${sessionInfo.region}` : ''}` : 'Unavailable'}>{sessionInfo.city ? `${sessionInfo.city}${sessionInfo.region ? `, ${sessionInfo.region}` : ''}` : 'Unavailable'}</span></>}</div></div><div className="staff-session-last"><span className="staff-session-eyebrow">Last sign-in</span><time dateTime={user?.last_sign_in_at || undefined}>{formatSignIn(user?.last_sign_in_at)}</time><p>Based on your account activity.</p></div></section></header>
         <div className="staff-settings-grid">
-          <label className="staff-settings-field" htmlFor="current-password"><span>Current password</span><input id="current-password" type="password" value={passwords.current} onChange={(event) => setPasswords((current) => ({ ...current, current: event.target.value }))} autoComplete="current-password" required /></label>
-          <label className="staff-settings-field" htmlFor="new-password"><span>New password</span><input id="new-password" type="password" value={passwords.password} onChange={(event) => setPasswords((current) => ({ ...current, password: event.target.value }))} autoComplete="new-password" minLength="8" required /><small>At least 8 characters.</small></label>
-          <label className="staff-settings-field" htmlFor="confirm-password"><span>Confirm new password</span><input id="confirm-password" type="password" value={passwords.confirm} onChange={(event) => setPasswords((current) => ({ ...current, confirm: event.target.value }))} autoComplete="new-password" minLength="8" required /></label>
+          <label className="staff-settings-field" htmlFor="current-password"><span>Current password</span><input id="current-password" type="password" value={passwords.current} onChange={(event) => setPasswords((current) => ({ ...current, current: event.target.value.slice(0, 32) }))} autoComplete="current-password" maxLength="32" required /></label>
+          <label className="staff-settings-field" htmlFor="new-password"><span>New password</span><input id="new-password" type="password" value={passwords.password} onChange={(event) => setPasswords((current) => ({ ...current, password: event.target.value.slice(0, 32) }))} autoComplete="new-password" minLength="8" maxLength="32" pattern=".{8,32}" required /><small>Use 8–32 characters.</small></label>
+          <label className="staff-settings-field" htmlFor="confirm-password"><span>Confirm new password</span><input id="confirm-password" type="password" value={passwords.confirm} onChange={(event) => setPasswords((current) => ({ ...current, confirm: event.target.value.slice(0, 32) }))} autoComplete="new-password" minLength="8" maxLength="32" pattern=".{8,32}" required /></label>
         </div>
         <footer className="staff-security-actions"><p className="staff-security-help">{role === 'admin' ? 'Forgot your current password? Use account recovery or ask another administrator for help.' : 'Forgot your current password? Contact an administrator to reset your account access.'}</p><button className="ops-main-action" type="submit" disabled={saving === 'password'}><LockKeyhole size={16} />{saving === 'password' ? 'Updating…' : 'Update password'}</button></footer>
       </form>}

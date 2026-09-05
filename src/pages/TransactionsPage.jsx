@@ -754,7 +754,7 @@ export default function TransactionsPage() {
         <div className="txn-filter-primary">
           <label className="menu-manage-search">
             <Search size={17} /><span className="sr-only">Search transactions</span>
-            <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder="Search order #, receipt, customer, email, phone..." />
+            <input value={search} onChange={(event) => { setSearch(event.target.value.slice(0, 100)); setPage(1) }} maxLength={100} placeholder="Search order #, receipt, customer, email, phone..." />
             {search && <button type="button" className="menu-manage-search-clear" aria-label="Clear search" onClick={() => { setSearch(''); setPage(1) }}><X size={14} /></button>}
           </label>
           <label className="txn-range-control"><span>Report period</span><select value={quickRange} onChange={(event) => { const nextRange = event.target.value; if (nextRange === 'custom') { setQuickRange('custom'); setFiltersOpen(true) } else applyQuickRange(nextRange) }}>
@@ -1334,7 +1334,7 @@ function RefundProcessModal({ target, busy, onClose, onSubmit }) {
           ? `Only mark this ${money(refund.amount)} refund as processed after the customer payout has actually been completed.`
           : `Rejecting this ${money(refund.amount)} refund will leave the cancelled order unresolved for follow-up.`}</p>
         <form onSubmit={submit}>
-          {approve && <label className="field"><span>Transfer or refund reference</span><input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value)} placeholder="e.g. GCash or bank reference number" autoFocus required /></label>}
+          {approve && <label className="field"><span>Transfer or refund reference</span><input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value.slice(0, 30))} maxLength={30} placeholder="e.g. GCash or bank reference number" autoFocus required /></label>}
           <p className="ops-proof-pending">{approve ? 'Saving this reference completes the refund and sends the customer a completion email.' : 'This action does not record a completed customer payout.'}</p>
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Go back</button>
@@ -1386,7 +1386,7 @@ function RefundModal({ transaction, busy, onClose, onSubmit }) {
               </select>
             </label>
           </div>
-          <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why this refund is needed." required /></label>
+          <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value.slice(0, 500))} maxLength={500} placeholder="Explain why this refund is needed." required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={close} disabled={busy}>Cancel</button>
@@ -1418,7 +1418,7 @@ function ReasonConfirmModal({ title, kicker, description, confirmLabel, busy, on
         <h2 id="reason-confirm-title">{title}</h2>
         <p>{description}</p>
         <form onSubmit={submit}>
-          <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} required /></label>
+          <label className="field"><span>Reason</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value.slice(0, 500))} maxLength={500} required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={close} disabled={busy}>Cancel</button>
@@ -1458,7 +1458,7 @@ function PaymentCorrectionModal({ transaction, busy, onClose, onSubmit }) {
               <option value="pending">Pending</option>
             </select>
           </label>
-          <label className="field"><span>Reason for correction</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)} required /></label>
+          <label className="field"><span>Reason for correction</span><textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value.slice(0, 500))} maxLength={500} required /></label>
           {error && <p className="form-error">{error}</p>}
           <div className="payment-modal-actions">
             <button className="secondary-button" type="button" onClick={close} disabled={busy}>Cancel</button>

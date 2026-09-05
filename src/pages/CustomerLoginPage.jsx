@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { isCustomerRole, normalizeRole, roleRoutes } from '../lib/auth'
 import { queueAuthWelcome } from '../lib/authFeedback'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { EMAIL_MAX_LENGTH, isValidEmail, isValidPassword, sanitizeUsername } from '../utils/inputValidation'
 
 const otpDigits = 6
 
@@ -96,12 +97,12 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     setAuthMessage('')
     if (!isSupabaseConfigured) return setAuthError('Supabase is not configured yet.')
     const data = new FormData(event.currentTarget)
-    const username = String(data.get('username') || '').trim()
+    const username = sanitizeUsername(String(data.get('username') || '').trim(), 24)
     const email = String(data.get('email') || '').trim()
     const password = String(data.get('password') || '')
     if (username.length < 3) return setAuthError('Username must be at least 3 characters long.')
-    if (!email) return setAuthError('Email address is required.')
-    if (password.length < 6 || !/\d/.test(password)) return setAuthError('Password must be at least 6 characters and include at least 1 number.')
+    if (!isValidEmail(email)) return setAuthError('Enter a valid email address.')
+    if (!isValidPassword(password)) return setAuthError('Password must be 8–32 characters and include at least 1 number.')
     setLoading(true)
     const { data: signupData, error } = await supabase.auth.signUp({
       email,
@@ -156,7 +157,7 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
     if (!isSupabaseConfigured) return setAuthError('Supabase is not configured yet.')
     const trimmedEmail = forgotEmail.trim()
     if (!trimmedEmail) return setAuthError('Enter your email address first.')
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return setAuthError('Enter a valid email address.')
+    if (!isValidEmail(trimmedEmail)) return setAuthError('Enter a valid email address.')
     setLoading(true)
     const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail)
     setLoading(false)
@@ -184,7 +185,7 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
   async function submitNewPassword(event) {
     event.preventDefault()
     setAuthError('')
-    if (newPassword.length < 6 || !/\d/.test(newPassword)) return setAuthError('Password must be at least 6 characters and include at least 1 number.')
+    if (!isValidPassword(newPassword)) return setAuthError('Password must be 8–32 characters and include at least 1 number.')
     if (newPassword !== confirmPassword) return setAuthError('The passwords do not match.')
     setLoading(true)
     const { error } = await supabase.auth.updateUser({ password: newPassword })
@@ -241,11 +242,11 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
             {authMessage && mode === 'login' ? <AuthNotice variant="success" message={authMessage} /> : null}
             <label className="legacy-auth-input">
               <span>Email address</span>
-              <div><Mail size={19} /><input name="email" type="email" placeholder="Enter your email" /></div>
+              <div><Mail size={19} /><input name="email" type="email" maxLength={EMAIL_MAX_LENGTH} autoComplete="email" placeholder="Enter your email" /></div>
             </label>
             <label className="legacy-auth-input">
               <span>Password <button type="button" onClick={openForgotPassword}>Forgot Password?</button></span>
-              <div><Lock size={19} /><input name="password" type={showLoginPassword ? 'text' : 'password'} placeholder="Enter your password" /><button type="button" aria-label="Toggle password visibility" onClick={() => setShowLoginPassword((value) => !value)}>{showLoginPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
+              <div><Lock size={19} /><input name="password" type={showLoginPassword ? 'text' : 'password'} minLength="8" maxLength="32" pattern="(?=.*[0-9]).{8,32}" placeholder="Enter your password" /><button type="button" aria-label="Toggle password visibility" onClick={() => setShowLoginPassword((value) => !value)}>{showLoginPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
             </label>
             <button type="submit" className="legacy-auth-submit" disabled={loading}>{loading ? 'PLEASE WAIT...' : 'LOGIN'}</button>
           </form>
@@ -258,15 +259,15 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
             {authMessage && mode === 'register' ? <AuthNotice variant="success" message={authMessage} /> : null}
             <label className="legacy-auth-input">
               <span>Username</span>
-              <div><User size={19} /><input name="username" type="text" placeholder="Choose a username" minLength="3" /></div>
+              <div><User size={19} /><input name="username" type="text" placeholder="Choose a username" minLength="3" maxLength="24" pattern="[A-Za-z0-9._-]+" onInput={(event) => { event.currentTarget.value = sanitizeUsername(event.currentTarget.value, 24) }} /></div>
             </label>
             <label className="legacy-auth-input">
               <span>Email address</span>
-              <div><Mail size={19} /><input name="email" type="email" placeholder="Enter your email" /></div>
+              <div><Mail size={19} /><input name="email" type="email" maxLength={EMAIL_MAX_LENGTH} autoComplete="email" placeholder="Enter your email" /></div>
             </label>
             <label className="legacy-auth-input">
               <span>Password</span>
-              <div><Lock size={19} /><input name="password" type={showRegisterPassword ? 'text' : 'password'} placeholder="Create a password" /><button type="button" aria-label="Toggle password visibility" onClick={() => setShowRegisterPassword((value) => !value)}>{showRegisterPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
+              <div><Lock size={19} /><input name="password" type={showRegisterPassword ? 'text' : 'password'} minLength="8" maxLength="32" pattern="(?=.*[0-9]).{8,32}" placeholder="Create a password" /><button type="button" aria-label="Toggle password visibility" onClick={() => setShowRegisterPassword((value) => !value)}>{showRegisterPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
             </label>
             <button type="submit" className="legacy-auth-submit" disabled={loading}><UserPlus size={18} /> {loading ? 'SENDING...' : 'CREATE ACCOUNT'}</button>
           </form>
@@ -292,7 +293,7 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
         {forgotStep === 'email' ? <form onSubmit={submitForgotPassword}>
           <p>Enter your account email and we will send a 6-digit password reset code.</p>
           {authError ? <AuthNotice variant="error" message={authError} /> : null}
-          <label className="legacy-auth-input"><span>Email address</span><div><Mail size={19} /><input type="email" value={forgotEmail} onChange={(event) => setForgotEmail(event.target.value)} placeholder="Enter your email" /></div></label>
+          <label className="legacy-auth-input"><span>Email address</span><div><Mail size={19} /><input type="email" value={forgotEmail} maxLength={EMAIL_MAX_LENGTH} onChange={(event) => setForgotEmail(event.target.value.slice(0, EMAIL_MAX_LENGTH))} placeholder="Enter your email" /></div></label>
           <button type="submit" className="legacy-auth-submit" disabled={loading}>{loading ? 'SENDING...' : 'SEND OTP CODE'}</button>
         </form> : null}
         {forgotStep === 'otp' ? <div>
@@ -307,9 +308,9 @@ export default function CustomerLoginPage({ initialMode = 'login' }) {
         {forgotStep === 'password' ? <form onSubmit={submitNewPassword}>
           <p>Your code is verified. Create a new password for your account.</p>
           {authError ? <AuthNotice variant="error" message={authError} /> : null}
-          <label className="legacy-auth-input"><span>New password</span><div><Lock size={19} /><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="Enter new password" /></div></label>
-          <label className="legacy-auth-input"><span>Confirm new password</span><div><Lock size={19} /><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Repeat new password" /></div></label>
-          <p className="legacy-auth-hint">Use at least 6 characters with at least 1 number.</p>
+          <label className="legacy-auth-input"><span>New password</span><div><Lock size={19} /><input type="password" value={newPassword} minLength="8" maxLength="32" pattern="(?=.*[0-9]).{8,32}" onChange={(event) => setNewPassword(event.target.value.slice(0, 32))} placeholder="Enter new password" /></div></label>
+          <label className="legacy-auth-input"><span>Confirm new password</span><div><Lock size={19} /><input type="password" value={confirmPassword} minLength="8" maxLength="32" pattern="(?=.*[0-9]).{8,32}" onChange={(event) => setConfirmPassword(event.target.value.slice(0, 32))} placeholder="Repeat new password" /></div></label>
+          <p className="legacy-auth-hint">Use 8–32 characters with at least 1 number.</p>
           <button type="submit" className="legacy-auth-submit" disabled={loading}>{loading ? 'UPDATING...' : 'UPDATE PASSWORD'}</button>
         </form> : null}
       </AuthModal> : null}

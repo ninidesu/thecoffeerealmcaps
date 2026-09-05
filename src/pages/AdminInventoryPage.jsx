@@ -168,7 +168,7 @@ export default function AdminInventoryPage() {
       <div className="inv-toolbar inv-monitoring-toolbar">
         <label className="ops-search">
           <Search size={17} /><span className="sr-only">Search {config.label.toLowerCase()}</span>
-          <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder={`Search ${config.label.toLowerCase()}…`} />
+          <input value={search} onChange={(event) => { setSearch(event.target.value.slice(0, 100)); setPage(1) }} maxLength={100} placeholder={`Search ${config.label.toLowerCase()}…`} />
         </label>
         <select value={categoryFilter} onChange={(event) => { setCategoryFilter(event.target.value); setPage(1) }} aria-label="Filter by category">
           <option value="all">All categories</option>

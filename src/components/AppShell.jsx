@@ -1,4 +1,4 @@
-import { BarChart3, Bell, Boxes, CalendarDays, CheckCheck, ClipboardList, Coffee, FileBarChart, LayoutDashboard, LogOut, Mail, MenuSquare, Moon, ReceiptText, RefreshCw, Settings, ShieldCheck, Sun, Trash2, Users, X } from 'lucide-react'
+import { BarChart3, Bell, Boxes, CalendarDays, CheckCheck, ClipboardList, Coffee, FileBarChart, LayoutDashboard, LogOut, MenuSquare, Moon, ReceiptText, RefreshCw, Settings, ShieldCheck, Sun, Trash2, Users, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { signOutPortal } from '../lib/auth'
@@ -21,7 +21,7 @@ const adminGroups = [
   { label: 'Administration', links: [['Content Management','/admin/content',MenuSquare],['Users & Access','/admin/users-access',Users],['System Settings','/admin/settings',Settings]] },
   { label: '', links: [['Settings','/admin/preferences',Settings]] },
 ]
-const staffGroups = [{ label:'', links:[['Order Preparation','/staff',ClipboardList],['Inventory Management','/staff/inventory',Boxes],['Manage Menu','/staff/menu',Coffee],['Customer Messages','/staff/messages',Mail],['Transactions','/staff/transactions',ReceiptText],['Settings','/staff/settings',Settings]] }]
+const staffGroups = [{ label:'', links:[['Order Preparation','/staff',ClipboardList],['Inventory Management','/staff/inventory',Boxes],['Manage Menu','/staff/menu',Coffee],['Transactions','/staff/transactions',ReceiptText],['Settings','/staff/settings',Settings]] }]
 
 function notificationTime(value) {
   const elapsed = Date.now() - new Date(value).getTime()

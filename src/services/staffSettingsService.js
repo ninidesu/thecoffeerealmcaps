@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { isValidInternalPassword } from '../utils/inputValidation'
 
 const STAFF_PREFERENCES_CACHE_KEY = 'tcr:staff-preferences'
 const STAFF_PREFERENCES_EVENT = 'tcr:staff-preferences-changed'
@@ -180,6 +181,7 @@ export async function saveStaffProfile(userId, values) {
 
 export async function changeStaffPassword(password) {
   if (!isSupabaseConfigured) throw new Error('Supabase is not configured.')
+  if (!isValidInternalPassword(password)) throw new Error('Use 8–32 characters.')
   const { error } = await supabase.auth.updateUser({ password })
   if (error) throw error
 }

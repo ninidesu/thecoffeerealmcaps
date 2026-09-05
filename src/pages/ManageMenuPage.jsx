@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, Archive, Bell, Box, CalendarDays, Check, Copy, Eye, ExternalLink, Folder,
-  Grid, ImagePlus, List, MoreVertical, Pencil, Plus, RefreshCw, Search, SlidersHorizontal, Star, Tags, TrendingUp, X,
+  AlertTriangle, Archive, Bell, Box, CalendarDays, Check, ClipboardCheck, Copy, Eye, ExternalLink, Folder,
+  Grid, ImagePlus, List, MoreVertical, Pencil, Plus, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Star, Tags, TrendingUp, X,
 } from 'lucide-react'
 import AppShell from '../components/AppShell'
+import '../menu-discount.css'
 import { money } from '../utils/money'
 import { describeError } from '../utils/describeError'
+import { sanitizeCatalogText } from '../utils/inputValidation'
 import { supabase } from '../lib/supabase'
 import {
   fetchMainCategories, fetchSubcategories, fetchManageMenuItems, fetchIngredientOptions, fetchMenuItemRecipe,
   upsertMainCategory, archiveMainCategory, upsertSubcategory, archiveSubcategory,
   upsertMenuItem, setMenuItemAvailability, archiveMenuItem, duplicateMenuItem, setMenuItemRecipe, uploadMenuItemImage,
+  requestMenuDiscountEligibility,
 } from '../services/manageMenuService'
 import { shouldShowSystemNotification } from '../services/staffSettingsService'
+import { createMenuApprovalRequest, getMenuChangeTypes } from '../services/menuApprovalService'
 import { useManagementSessionState } from '../hooks/useManagementSessionState'
 
 const REASON_META = {
@@ -62,6 +66,7 @@ export default function ManageMenuPage() {
   const [availabilityTarget, setAvailabilityTarget] = useManagementSessionState('staff:menu:availability-confirmation', null)
   const [archiveTarget, setArchiveTarget] = useManagementSessionState('staff:menu:archive-confirmation', null)
   const [categoryManagerOpen, setCategoryManagerOpen] = useManagementSessionState('staff:menu:category-manager', false)
+  const [approvalTarget, setApprovalTarget] = useState(null)
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
 
@@ -86,8 +91,10 @@ export default function ManageMenuPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'subcategories' }, () => load())
       .subscribe()
     const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    const onApprovalChanged = () => load()
     document.addEventListener('visibilitychange', onVisible)
-    return () => { supabase.removeChannel(channel); document.removeEventListener('visibilitychange', onVisible) }
+    window.addEventListener('menu-approval-requests-changed', onApprovalChanged)
+    return () => { supabase.removeChannel(channel); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('menu-approval-requests-changed', onApprovalChanged) }
   }, [])
 
   const pushToast = (type, message) => {
@@ -95,6 +102,23 @@ export default function ManageMenuPage() {
     const id = crypto.randomUUID()
     setToasts((c) => [...c, { id, type, message }])
     setTimeout(() => setToasts((c) => c.filter((t) => t.id !== id)), 4500)
+  }
+
+  const requestApproval = (target, operation) => new Promise((resolve, reject) => {
+    setApprovalTarget({ ...target, operation, resolve, reject, busy: false })
+  })
+
+  const confirmApproval = async () => {
+    if (!approvalTarget || approvalTarget.busy) return
+    const target = approvalTarget
+    setApprovalTarget((current) => ({ ...current, busy: true }))
+    try {
+      const result = target.bulkDiscount
+        ? await requestMenuDiscountEligibility(target.payload.ids, true)
+        : await createMenuApprovalRequest({ action: target.action, itemName: target.itemName, summary: target.summary, changeTypes: target.changeTypes, operation: target.operationKey, payload: target.payload })
+      target.resolve(result); setApprovalTarget(null)
+    }
+    catch (cause) { target.reject(cause); setApprovalTarget(null) }
   }
 
   const activeSubcategories = useMemo(() => {
@@ -184,13 +208,14 @@ export default function ManageMenuPage() {
     }
   }
 
-  const runBulkAvailability = async (available) => {
+  const executeBulkAvailability = async (available, ids = selectedIds) => {
     setBusyId('bulk')
     try {
-      await Promise.all(selectedIds.map((id) => setMenuItemAvailability(id, available)))
-      pushToast('success', `Updated ${selectedIds.length} item${selectedIds.length === 1 ? '' : 's'}.`)
+      await Promise.all(ids.map((id) => setMenuItemAvailability(id, available)))
+      pushToast('success', `Updated ${ids.length} item${ids.length === 1 ? '' : 's'}.`)
       clearSelection()
       await load()
+      setAvailabilityTarget(null)
     } catch (cause) {
       pushToast('error', describeError(cause, 'Could not update the selected items.'))
     } finally {
@@ -198,7 +223,25 @@ export default function ManageMenuPage() {
     }
   }
 
+  const runBulkAvailability = (available) => setAvailabilityTarget({
+    id: 'bulk', name: `${selectedIds.length} selected menu items`, manualAvailable: !available,
+    isBulk: true, targetAvailable: available, ids: [...selectedIds],
+  })
+
   const attentionCount = unavailableCount
+  const discountSelection = items.filter(item => selectedIds.includes(item.id) && !item.isArchived && !item.onlineBenefitEligible)
+  const runBulkDiscountEligibility = async () => {
+    const ids = discountSelection.map(item => item.id)
+    if (!ids.length || busyId) return
+    setBusyId('bulk')
+    try {
+      const count = await requestApproval({ bulkDiscount: true, itemName: `${ids.length} selected item${ids.length === 1 ? '' : 's'}`, summary: 'Enable online Senior Citizen / PWD discount eligibility. Items will be archived while awaiting admin review', changeTypes: ['Online SC/PWD discount eligibility'], payload: { ids } })
+      clearSelection(); await load()
+      pushToast('success', `${count} eligibility request${count === 1 ? '' : 's'} sent for admin review.`)
+    } catch (cause) {
+      if (cause?.code !== 'APPROVAL_CANCELLED') pushToast('error', describeError(cause, 'Could not submit discount eligibility changes.'))
+    } finally { setBusyId('') }
+  }
 
   return (
     <AppShell role="staff" title="Manage Menu" onRefresh={load} actions={
@@ -300,6 +343,7 @@ export default function ManageMenuPage() {
         {selectedIds.length > 0 && (
           <div className="menu-bulk-bar" aria-live="polite">
             <span>{selectedIds.length} selected</span>
+            <button type="button" className="ops-secondary-action compact" disabled={Boolean(busyId) || loading || !discountSelection.length} onClick={runBulkDiscountEligibility} title="Enable online SC/PWD discounts for selected active items that are not yet eligible">Enable SC/PWD discount ({discountSelection.length})</button>
             <button type="button" className="ops-secondary-action compact" disabled={busyId === 'bulk'} onClick={() => runBulkAvailability(true)}>Mark Available</button>
             <button type="button" className="ops-secondary-action compact" disabled={busyId === 'bulk'} onClick={() => runBulkAvailability(false)}>Mark Unavailable</button>
             <button type="button" className="ops-secondary-action compact" onClick={clearSelection}>Clear</button>
@@ -321,7 +365,7 @@ export default function ManageMenuPage() {
               onView={() => { setDrawerItem(item); setMenuOpenId('') }}
               onEdit={() => { setFormTarget({ item }); setMenuOpenId('') }}
               onToggleAvailability={() => setAvailabilityTarget(item)}
-              onDuplicate={() => { runDuplicate(item); setMenuOpenId('') }}
+              onDuplicate={() => { requestApproval({ action: 'add', itemName: `${item.name} copy`, summary: 'Create a duplicate menu item', changeTypes: ['New item'], operationKey: 'duplicate_menu_item', payload: { id: item.id } }, () => runDuplicate(item)).then(() => pushToast('success', `${item.name} duplication sent for admin review.`)).catch(() => {}); setMenuOpenId('') }}
               onArchive={() => { setArchiveTarget(item); setMenuOpenId('') }}
             />
           ))}
@@ -332,7 +376,8 @@ export default function ManageMenuPage() {
         <ItemFormModal
           item={formTarget.item} mainCategories={mainCategories} subcategories={subcategories}
           onClose={() => setFormTarget(null)}
-          onSave={async (payload) => { const id = await upsertMenuItem(payload); await load(); pushToast('success', `${payload.name} was saved.`); setFormTarget(null); return id }}
+          onDelete={() => { const target = formTarget.item; setFormTarget(null); setArchiveTarget(target) }}
+          onSave={async (payload) => { const id = await requestApproval({ action: payload.id ? 'change' : 'add', itemName: payload.name, summary: payload.id ? `Save menu changes${Boolean(formTarget.item?.onlineBenefitEligible) !== Boolean(payload.onlineBenefitEligible) ? `; online SC/PWD discount eligibility ${payload.onlineBenefitEligible ? 'on' : 'off'}` : ''}` : `Add this menu item to the catalog; online SC/PWD discount eligibility ${payload.onlineBenefitEligible ? 'on' : 'off'}`, changeTypes: getMenuChangeTypes(formTarget.item, payload), operationKey: 'upsert_menu_item', payload }, () => Promise.resolve()); pushToast('success', `${payload.name} was sent for admin review.`); setFormTarget(null); return id }}
         />
       )}
       {drawerItem && (
@@ -349,12 +394,13 @@ export default function ManageMenuPage() {
           onKeyDown={(e) => { if (e.key === 'Escape' && busyId !== availabilityTarget.id) setAvailabilityTarget(null) }}
         >
           <section className="payment-modal ops-popup-modal menu-availability-modal" role="dialog" aria-modal="true" aria-labelledby="menu-availability-title" aria-describedby="menu-availability-description">
-            <span className="payment-modal-kicker">Confirm availability</span>
+            <span className="payment-modal-kicker">Confirmation required</span>
             <h2 id="menu-availability-title">Mark {availabilityTarget.name} {availabilityTarget.manualAvailable ? 'unavailable' : 'available'}?</h2>
             <p id="menu-availability-description">
+              This change will apply immediately.{' '}
               {availabilityTarget.manualAvailable
-                ? 'Customers will no longer be able to order this item until you make it available again.'
-                : 'Customers will be able to see and order this item when its ingredients are in stock.'}
+                ? availabilityTarget.isBulk ? 'All selected items will no longer be available for ordering.' : 'Customers will no longer be able to order this item until you make it available again.'
+                : availabilityTarget.isBulk ? 'All selected items will be available for ordering when their ingredients are in stock.' : 'Customers will be able to see and order this item when its ingredients are in stock.'}
             </p>
             <div className="payment-modal-actions">
               <button className="secondary-button" type="button" autoFocus onClick={() => setAvailabilityTarget(null)} disabled={busyId === availabilityTarget.id}>Cancel</button>
@@ -362,7 +408,7 @@ export default function ManageMenuPage() {
                 className={availabilityTarget.manualAvailable ? 'danger-button' : 'primary-button'}
                 type="button"
                 disabled={busyId === availabilityTarget.id}
-                onClick={() => runToggleAvailability(availabilityTarget)}
+                onClick={() => availabilityTarget.isBulk ? executeBulkAvailability(availabilityTarget.targetAvailable, availabilityTarget.ids) : runToggleAvailability(availabilityTarget)}
               >
                 {busyId === availabilityTarget.id
                   ? 'Updating…'
@@ -375,12 +421,12 @@ export default function ManageMenuPage() {
       {archiveTarget && (
         <div className="payment-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && busyId !== archiveTarget.id) setArchiveTarget(null) }}>
           <section className="payment-modal" role="alertdialog" aria-modal="true" aria-labelledby="menu-archive-title">
-            <span className="payment-modal-kicker">Archive item</span>
-            <h2 id="menu-archive-title">Archive {archiveTarget.name}?</h2>
-            <p>It will disappear from the customer menu and active lists, but stays linked to past orders, receipts, and recipes.</p>
+            <span className="payment-modal-kicker">Admin review required</span>
+            <h2 id="menu-archive-title">Delete {archiveTarget.name}?</h2>
+            <p>This deletion must be reviewed by an administrator before it is applied. The item will be archived to preserve past orders, receipts, and recipes.</p>
             <div className="payment-modal-actions">
               <button className="secondary-button" type="button" onClick={() => setArchiveTarget(null)} disabled={busyId === archiveTarget.id}>Keep item</button>
-              <button className="danger-button" type="button" disabled={busyId === archiveTarget.id} onClick={() => runArchive(archiveTarget)}>{busyId === archiveTarget.id ? 'Archiving…' : 'Archive item'}</button>
+              <button className="danger-button" type="button" disabled={busyId === archiveTarget.id} onClick={() => { const target = archiveTarget; setArchiveTarget(null); requestApproval({ action: 'remove', itemName: target.name, summary: 'Remove this menu item from active listings', changeTypes: ['Item removal'], operationKey: 'archive_menu_item', payload: { id: target.id } }, () => runArchive(target)).then(() => pushToast('success', `${target.name} removal sent for admin review.`)).catch(() => {}) }}>{busyId === archiveTarget.id ? 'Archiving…' : 'Send for review'}</button>
             </div>
           </section>
         </div>
@@ -389,15 +435,29 @@ export default function ManageMenuPage() {
         <CategoryManagerModal
           mainCategories={mainCategories} subcategories={subcategories}
           onClose={() => setCategoryManagerOpen(false)}
-          onChanged={load} pushToast={pushToast}
+          onChanged={load} pushToast={pushToast} requestApproval={requestApproval}
         />
       )}
 
       <div className="ops-toasts" role="status" aria-live="polite">
         {toasts.map((t) => <div className={`ops-toast ops-toast-${t.type}`} key={t.id}>{t.type === 'success' ? <Check size={15} /> : <AlertTriangle size={15} />} {t.message}</div>)}
       </div>
+      {approvalTarget && <ApprovalRequiredModal target={approvalTarget} onClose={() => { if (!approvalTarget.busy) { const cause = new Error('Approval request cancelled'); cause.code = 'APPROVAL_CANCELLED'; approvalTarget.reject(cause); setApprovalTarget(null) } }} onConfirm={confirmApproval} />}
     </AppShell>
   )
+}
+
+function ApprovalRequiredModal({ target, onClose, onConfirm }) {
+  return <div className="payment-modal-backdrop ops-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !target.busy) onClose() }}>
+    <section className="payment-modal menu-approval-required-modal" role="alertdialog" aria-modal="true" aria-labelledby="menu-approval-required-title" aria-describedby="menu-approval-required-description">
+      <span className="payment-modal-kicker">Admin review required</span>
+      <span className="menu-approval-required-icon"><ClipboardCheck size={22} /></span>
+      <h2 id="menu-approval-required-title">Send for admin approval?</h2>
+      <p id="menu-approval-required-description"><b>{target.itemName}</b> · {target.summary}.</p>
+      <div className="menu-approval-change-types"><span>Changes</span><div>{target.changeTypes.map((type) => <em key={type}>{type}</em>)}</div></div>
+      <div className="payment-modal-actions"><button className="secondary-button" type="button" autoFocus onClick={onClose} disabled={target.busy}>Cancel</button><button className="primary-button" type="button" onClick={onConfirm} disabled={target.busy}>{target.busy ? 'Sending…' : 'Send for admin review'}</button></div>
+    </section>
+  </div>
 }
 
 function MenuItemCard({ item, view, busy, selected, onToggleSelect, menuOpen, onToggleMenu, onView, onEdit, onToggleAvailability, onDuplicate, onArchive }) {
@@ -430,6 +490,7 @@ function MenuItemCard({ item, view, busy, selected, onToggleSelect, menuOpen, on
         <div className="menu-card-badges">
           <span className={`inv-status tone-${item.available ? 'green' : 'red'}`}>{item.available ? 'Available' : 'Unavailable'}</span>
           {customizable && <span className="inv-status tone-blue">{item.temperatureType === 'iced_only' ? 'Iced only' : item.temperatureType === 'hot_only' ? 'Hot only' : 'Flexible'}</span>}
+          {item.onlineBenefitEligible && <span className="inv-status tone-green">Online SC/PWD eligible</span>}
           {!item.available && reason && <span className="menu-badge-warning"><AlertTriangle size={13} /> {reason.label}</span>}
         </div>
         <p className="menu-card-meta">Updated {timeAgo(item.updatedAt)}</p>
@@ -464,6 +525,7 @@ function ItemDrawer({ item, onClose, onEdit, onToggleAvailability }) {
           <section><h3>Details</h3>
             <p>Category: {item.mainCategory} · {item.subcategory || '—'}</p>
             <p>Type: {item.itemType}</p>
+            <p>Online SC/PWD discount: {item.onlineBenefitEligible ? 'Eligible' : 'Not eligible'}</p>
             <p>Temperature: {TEMP_LABEL[item.temperatureType]}</p>
             {item.prepTimeMinutes ? <p>Prep time: {item.prepTimeMinutes} min</p> : null}
             {(item.availableFrom || item.availableUntil) && <p>Scheduled: {item.availableFrom || '—'} to {item.availableUntil || '—'}</p>}
@@ -483,12 +545,13 @@ function ItemDrawer({ item, onClose, onEdit, onToggleAvailability }) {
   )
 }
 
-function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave }) {
+function ItemFormModal({ item, mainCategories, subcategories, onClose, onDelete, onSave }) {
   const draftScope = `staff:menu:${item?.id || 'new'}:draft`
   const [values, setValues, clearValues] = useManagementSessionState(`${draftScope}:values`, {
     name: item?.name || '', description: item?.description || '', mainCategoryId: item?.mainCategoryId || mainCategories[0]?.id || '',
     subcategoryId: item?.subcategoryId || '', price: item?.price ?? '', itemType: item?.itemType || 'food', temperatureType: item?.temperatureType || 'none',
     allowIce: item?.allowIce ?? false, allowSugar: item?.allowSugar ?? false, allowAddons: item?.allowAddons ?? false,
+    onlineBenefitEligible: item?.onlineBenefitEligible ?? false,
     imageUrl: item?.imageUrl || '', manualAvailable: item?.manualAvailable ?? true, isFeatured: item?.isFeatured ?? false, isBestseller: item?.isBestseller ?? false,
     prepTimeMinutes: item?.prepTimeMinutes ?? '', availableFrom: item?.availableFrom || '', availableUntil: item?.availableUntil || '', sortOrder: item?.sortOrder ?? 0,
   })
@@ -526,10 +589,10 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
     if (values.availableFrom && values.availableUntil && values.availableFrom > values.availableUntil) { setSection('scheduling'); return setError('Available-from date must be before the available-until date.') }
     setSaving(true); setError('')
     try {
-      await onSave({ id: item?.id, ...values, price, prepTimeMinutes: values.prepTimeMinutes === '' ? null : Number(values.prepTimeMinutes) })
+      await onSave({ id: item?.id, ...values, onlineBenefitEligible: values.onlineBenefitEligible ?? item?.onlineBenefitEligible ?? false, price, prepTimeMinutes: values.prepTimeMinutes === '' ? null : Number(values.prepTimeMinutes) })
       clearValues(); clearImagePreview(); clearSection()
     } catch (cause) {
-      setError(describeError(cause, 'Could not save this item.'))
+      if (cause?.code !== 'APPROVAL_CANCELLED') setError(describeError(cause, 'Could not save this item.'))
       setSaving(false)
     }
   }
@@ -541,7 +604,6 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
         <header className="menu-workspace-header">
           <span className="payment-modal-kicker">{item ? 'Edit menu item' : 'New menu item'}</span>
           <h2 id="menu-form-title">{item ? item.name : 'Add a new menu item'}</h2>
-          <p>Move through each section to organize the item details, customer options, and availability.</p>
         </header>
         <form className="menu-editor-form" onSubmit={submit}>
           <div className="menu-editor-layout">
@@ -553,19 +615,19 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
             <div className="menu-editor-panel">
               {section === 'basics' && (
                 <section id="menu-editor-basics" role="tabpanel" className="menu-form-section" aria-label="Basic item details">
-                  <header><h3>Basic details</h3><p>The information customers use to identify this item.</p></header>
+                  <header className="menu-basics-discount-header"><div><h3>Basic details</h3><p>The information customers use to identify this item.</p></div><div className="menu-online-discount-control"><span id="menu-online-discount-label">Online SC/PWD discount</span><button type="button" role="switch" aria-checked={values.onlineBenefitEligible ?? item?.onlineBenefitEligible ?? false} aria-labelledby="menu-online-discount-label" aria-describedby="menu-online-discount-hint" className="menu-online-discount-switch" onClick={() => set('onlineBenefitEligible', !(values.onlineBenefitEligible ?? item?.onlineBenefitEligible ?? false))} disabled={saving}><i aria-hidden="true"/><span>{(values.onlineBenefitEligible ?? item?.onlineBenefitEligible ?? false) ? 'On' : 'Off'}</span></button><small id="menu-online-discount-hint">Save changes to request approval.</small></div></header>
                   <div className="menu-image-upload menu-image-upload-card">
                     {imagePreview ? <img src={imagePreview} alt={`${values.name || 'Menu item'} preview`} /> : <div className="menu-image-placeholder"><ImagePlus size={24} /></div>}
                     <div><b>Menu photo</b><p>Use a clear square image. JPG, PNG, or WEBP up to 5MB.</p><button type="button" className="ops-secondary-action compact" onClick={() => fileRef.current?.click()} disabled={uploading}>{uploading ? 'Uploading…' : imagePreview ? 'Replace image' : 'Upload image'}</button><input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={handleFile} /></div>
                   </div>
                   <div className="form-grid menu-form-grid">
-                    <label className="field"><span>Item name</span><input autoFocus value={values.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Spanish Latte" required /></label>
+                    <label className="field"><span>Item name</span><input autoFocus value={values.name} maxLength={80} onChange={(e) => set('name', sanitizeCatalogText(e.target.value, 80))} placeholder="e.g. Spanish Latte" required /></label>
                     <label className="field"><span>Menu price incl. VAT (PHP)</span><input type="number" min="0" step="0.01" value={values.price} onChange={(e) => set('price', e.target.value)} placeholder="0.00" required /></label>
                     <label className="field"><span>Main category</span><select value={values.mainCategoryId} onChange={(e) => { set('mainCategoryId', e.target.value); set('subcategoryId', '') }}>{mainCategories.filter((c) => !c.is_archived).map((c) => <option key={c.id} value={c.id}>{c.display_name || c.name}</option>)}</select></label>
                     <label className="field"><span>Subcategory</span><select value={values.subcategoryId} onChange={(e) => set('subcategoryId', e.target.value)}><option value="">No subcategory</option>{availableSubcategories.map((s) => <option key={s.id} value={s.id}>{s.display_name || s.name}</option>)}</select></label>
                     <label className="field"><span>Item type</span><select value={values.itemType} onChange={(e) => set('itemType', e.target.value)}><option value="drink">Drink</option><option value="food">Food</option></select></label>
                   </div>
-                  <label className="field menu-description-field"><span>Description</span><textarea rows="3" value={values.description} onChange={(e) => set('description', e.target.value)} placeholder="Describe the flavor, ingredients, or serving style." /></label>
+                  <label className="field menu-description-field"><span>Description</span><textarea rows="3" maxLength={500} value={values.description} onChange={(e) => set('description', e.target.value)} placeholder="Describe the flavor, ingredients, or serving style." /></label>
                 </section>
               )}
               {section === 'options' && (
@@ -597,14 +659,18 @@ function ItemFormModal({ item, mainCategories, subcategories, onClose, onSave })
             </div>
           </div>
           {error && <p className="form-error menu-workspace-error" role="alert">{error}</p>}
-          <div className="payment-modal-actions menu-workspace-actions"><button className="secondary-button" type="button" onClick={close} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || uploading}>{saving ? 'Saving…' : item ? 'Save changes' : 'Add item'}</button></div>
+          <div className="payment-modal-actions menu-workspace-actions">
+            {item && !item.isArchived && <button className="ops-destructive-action compact menu-form-delete-button" type="button" onClick={onDelete} disabled={saving || uploading}><Archive size={15} /> Delete item</button>}
+            <button className="secondary-button" type="button" onClick={close} disabled={saving}>Cancel</button>
+            <button className="primary-button" type="submit" disabled={saving || uploading}>{saving ? 'Saving…' : item ? 'Save changes' : 'Add item'}</button>
+          </div>
         </form>
       </section>
     </div>
   )
 }
 
-function CategoryManagerModal({ mainCategories, subcategories, onClose, onChanged, pushToast }) {
+function CategoryManagerModal({ mainCategories, subcategories, onClose, onChanged, pushToast, requestApproval }) {
   const [tab, setTab, clearTab] = useManagementSessionState('staff:menu:category-draft:tab', 'main')
   const [name, setName, clearName] = useManagementSessionState('staff:menu:category-draft:name', '')
   const [displayName, setDisplayName, clearDisplayName] = useManagementSessionState('staff:menu:category-draft:display-name', '')
@@ -618,25 +684,23 @@ function CategoryManagerModal({ mainCategories, subcategories, onClose, onChange
     if (!name.trim()) return setError('Name is required.')
     setSaving(true); setError('')
     try {
-      await upsertMainCategory({ name, displayName })
+      await requestApproval({ action: 'add', itemName: displayName || name, summary: 'Add a main menu category', changeTypes: ['New category'], operationKey: 'upsert_main_category', payload: { name, displayName } }, () => upsertMainCategory({ name, displayName }))
       setName(''); setDisplayName('')
-      pushToast('success', 'Category saved.')
-      await onChanged()
-    } catch (cause) { setError(describeError(cause, 'Could not save category.')) } finally { setSaving(false) }
+      pushToast('success', 'Category sent for admin review.')
+    } catch (cause) { if (cause?.code !== 'APPROVAL_CANCELLED') setError(describeError(cause, 'Could not save category.')) } finally { setSaving(false) }
   }
   const addSub = async (event) => {
     event.preventDefault()
     if (!name.trim()) return setError('Name is required.')
     setSaving(true); setError('')
     try {
-      await upsertSubcategory({ name, displayName, mainCategoryId: parentId || null })
+      await requestApproval({ action: 'add', itemName: displayName || name, summary: 'Add a menu subcategory', changeTypes: ['New category'], operationKey: 'upsert_subcategory', payload: { name, displayName, mainCategoryId: parentId || null } }, () => upsertSubcategory({ name, displayName, mainCategoryId: parentId || null }))
       setName(''); setDisplayName('')
-      pushToast('success', 'Subcategory saved.')
-      await onChanged()
-    } catch (cause) { setError(describeError(cause, 'Could not save subcategory.')) } finally { setSaving(false) }
+      pushToast('success', 'Subcategory sent for admin review.')
+    } catch (cause) { if (cause?.code !== 'APPROVAL_CANCELLED') setError(describeError(cause, 'Could not save subcategory.')) } finally { setSaving(false) }
   }
   const archive = async (fn, id, label) => {
-    try { await fn(id); pushToast('success', `${label} archived.`); await onChanged() }
+    try { const operationKey = fn === archiveMainCategory ? 'archive_main_category' : 'archive_subcategory'; await requestApproval({ action: 'remove', itemName: label, summary: 'Archive this menu category', changeTypes: ['Item removal'], operationKey, payload: { id } }, () => fn(id)); pushToast('success', `${label} removal sent for admin review.`) }
     catch (cause) { pushToast('error', describeError(cause, `Could not archive ${label.toLowerCase()}.`)) }
   }
 
@@ -682,8 +746,8 @@ function CategoryManagerModal({ mainCategories, subcategories, onClose, onChange
             <header><span><Plus size={18} /></span><div><h3>Add {tab === 'main' ? 'a main category' : 'a subcategory'}</h3><p>{tab === 'main' ? 'Create a broad menu group such as Drinks or Foods.' : 'Create a focused group such as Espresso or Cakes.'}</p></div></header>
             <form onSubmit={tab === 'main' ? addMain : addSub}>
               {tab === 'sub' && <label className="field"><span>Parent category</span><select value={parentId} onChange={(e) => setParentId(e.target.value)} required>{activeMainCategories.map((category) => <option key={category.id} value={category.id}>{category.display_name || category.name}</option>)}</select><small>Where this subcategory will appear.</small></label>}
-              <label className="field"><span>Internal name</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={tab === 'main' ? 'e.g. drinks' : 'e.g. espresso'} required /><small>Use a short, unique system name.</small></label>
-              <label className="field"><span>Customer-facing name</span><input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={tab === 'main' ? 'e.g. Drinks' : 'e.g. Espresso'} /><small>Optional. Falls back to the internal name.</small></label>
+                  <label className="field"><span>Internal name</span><input autoFocus value={name} maxLength={40} onChange={(e) => setName(sanitizeCatalogText(e.target.value, 40))} placeholder={tab === 'main' ? 'e.g. drinks' : 'e.g. espresso'} required /><small>Use a short, unique system name.</small></label>
+                  <label className="field"><span>Customer-facing name</span><input value={displayName} maxLength={60} onChange={(e) => setDisplayName(sanitizeCatalogText(e.target.value, 60))} placeholder={tab === 'main' ? 'e.g. Drinks' : 'e.g. Espresso'} /><small>Optional. Falls back to the internal name.</small></label>
               {error && <p className="form-error" role="alert">{error}</p>}
               <button className="primary-button category-add-button" type="submit" disabled={saving || (tab === 'sub' && activeMainCategories.length === 0)}>{saving ? 'Saving…' : `Add ${tab === 'main' ? 'category' : 'subcategory'}`}</button>
             </form>

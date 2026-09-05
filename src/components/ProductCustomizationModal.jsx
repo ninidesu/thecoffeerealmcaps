@@ -118,7 +118,7 @@ export default function ProductCustomizationModal({ product, onClose, onAdd, var
           )}
           <label className="field">
             <span>Special instructions</span>
-            <textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Allergies or preparation notes" />
+            <textarea value={instructions} maxLength={300} onChange={(event) => setInstructions(event.target.value)} placeholder="Allergies or preparation notes" />
           </label>
         </div>
 

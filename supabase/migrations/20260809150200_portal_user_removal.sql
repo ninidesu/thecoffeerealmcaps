@@ -41,17 +41,14 @@ declare
 begin
   if not public.is_admin_profile() then raise exception 'Administrator access required'; end if;
   if v_role not in ('admin', 'staff', 'operational_staff', 'cashier') then raise exception 'Invalid portal role'; end if;
-
   select * into v_current from public.profiles where id = p_user_id and removed_at is null for update;
   if not found then raise exception 'User account not found'; end if;
   if p_user_id = auth.uid() and v_role <> 'admin' then raise exception 'You cannot remove your own administrator access'; end if;
-
   if public.normalize_role(v_current.role) = 'admin' and v_role <> 'admin' then
     select count(*) into v_other_admins from public.profiles
     where id <> p_user_id and public.normalize_role(role) = 'admin' and removed_at is null;
     if v_other_admins = 0 then raise exception 'At least one administrator is required'; end if;
   end if;
-
   update public.profiles set role = v_role, updated_at = now()
   where id = p_user_id returning * into v_result;
   return v_result;

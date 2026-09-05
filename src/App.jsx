@@ -8,9 +8,9 @@ import CashierPage from './pages/CashierPage'
 import CustomerLoginPage from './pages/CustomerLoginPage'
 import HomePage from './pages/HomePage'
 import HelpPage from './pages/customer/HelpPage'
+import BenefitsPage from './pages/customer/BenefitsPage'
 import InventoryStockPage from './pages/InventoryStockPage'
 import ManageMenuPage from './pages/ManageMenuPage'
-import CustomerMessagesPage from './pages/CustomerMessagesPage'
 import OrderPreparationPage from './pages/OrderPreparationPage'
 import PortalLoginPage from './pages/PortalLoginPage'
 import StaffDashboard from './pages/StaffDashboard'
@@ -49,6 +49,7 @@ export default function App() {
           <Route path="/orders/:id/confirmation" element={protect(<OrderConfirmationPage />)} />
           <Route path="/orders/:id/track" element={protect(<OrderTrackingPage />)} />
           <Route path="/profile" element={protect(<ProfilePage />)} />
+          <Route path="/profile/benefits" element={protect(<BenefitsPage />)} />
           <Route path="/addresses" element={<Navigate to="/profile" replace />} />
           <Route path="/settings" element={<Navigate to="/profile" replace />} />
         </Route>
@@ -78,10 +79,6 @@ export default function App() {
         <Route
           path="/staff/menu"
           element={<ProtectedRoute allowedRoles={['staff', 'operational_staff']}><ManageMenuPage /></ProtectedRoute>}
-        />
-        <Route
-          path="/staff/messages"
-          element={<ProtectedRoute allowedRoles={['staff', 'operational_staff']}><CustomerMessagesPage /></ProtectedRoute>}
         />
         <Route
           path="/staff/reports"

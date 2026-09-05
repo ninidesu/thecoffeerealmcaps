@@ -7,7 +7,7 @@ export const CONTENT_DEFAULTS = {
     eyebrow: 'thecoffeerealm in North Fairview',
     title: 'Fresh coffee, homemade sweets, and slow little moments.',
     body: 'We serve comforting coffee-based drinks, freshly baked cookies, homemade cakes, pasta, rice meals, toasts, and snacks in a warm neighborhood space.',
-    primaryLabel: 'View full menu', primaryHref: '/menu', secondaryLabel: 'Send us a message', secondaryHref: '#customer-inquiry-form',
+    primaryLabel: 'View full menu', primaryHref: '/menu', secondaryLabel: 'Send us a message', secondaryHref: '/help',
   },
   featured: { eyebrow: 'Customer favorites', title: 'Bestsellers from the realm.', visible: true, itemIds: [] },
   inquiry: {

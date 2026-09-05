@@ -31,7 +31,7 @@ Deno.serve(async (request) => {
     const body = await request.json();
     const username = String(body?.username || "").trim();
     const password = String(body?.password || "");
-    if (!username || !password || username.length > 32) return json({ success: false, error: "Invalid email, username, or password." });
+    if (!username || !password || username.length > 24) return json({ success: false, error: "Invalid email, username, or password." });
 
     const { data: profile, error: profileError } = await admin
       .from("profiles")

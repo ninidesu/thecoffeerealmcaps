@@ -14,6 +14,9 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
+const validEmail = (value: string) => value.length <= 160 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
+const validName = (value: string) => /^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ .'-]{1,59}$/.test(value);
+const validUsername = (value: string) => /^[A-Za-z0-9._-]{3,24}$/.test(value);
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -39,7 +42,7 @@ Deno.serve(async (request) => {
       const fullName = String(body?.fullName || "").trim();
       const username = String(body?.username || "").trim() || null;
       const role = String(body?.role || "").trim().toLowerCase();
-      if (!email || !fullName || !["admin", "operational_staff", "cashier"].includes(role)) {
+      if (!validEmail(email) || !validName(fullName) || (username && !validUsername(username)) || !["admin", "operational_staff", "cashier"].includes(role)) {
         return json({ success: false, error: "Name, email, and a valid portal role are required." }, 400);
       }
 
